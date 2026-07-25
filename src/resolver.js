@@ -49,10 +49,7 @@ function normalizeLoadResult(result) {
     error = data || result?.exception || null;
   }
 
-  // Compatibility with older Lavalink/Shoukaku response shapes.
-  if (!tracks.length && Array.isArray(result?.tracks)) {
-    tracks = result.tracks;
-  }
+  if (!tracks.length && Array.isArray(result?.tracks)) tracks = result.tracks;
 
   return {
     loadType,
@@ -60,6 +57,26 @@ function normalizeLoadResult(result) {
     playlistInfo,
     error,
   };
+}
+
+function normalizeIdentity(identity = {}) {
+  return {
+    title: String(identity.title || "").trim(),
+    artist: String(identity.artist || "").trim(),
+    album: String(identity.album || "").trim(),
+    artworkUrl: String(identity.artworkUrl || "").trim(),
+    durationMs: Number.isFinite(Number(identity.durationMs)) ? Number(identity.durationMs) : 0,
+    durationTrusted: Boolean(identity.durationTrusted),
+    sourceType: String(identity.sourceType || "unknown").trim(),
+    sourceId: String(identity.sourceId || "").trim(),
+    sourceUrl: String(identity.sourceUrl || "").trim(),
+    requestedQuery: String(identity.requestedQuery || "").trim(),
+  };
+}
+
+function attachTrackIdentity(track, identity) {
+  if (track && typeof track === "object") track.stoneyIdentity = normalizeIdentity(identity);
+  return track;
 }
 
 function toQueueTrack(track, requesterId) {
@@ -71,17 +88,24 @@ function toQueueTrack(track, requesterId) {
   }
 
   const info = track.info || {};
+  const identity = track.stoneyIdentity ? normalizeIdentity(track.stoneyIdentity) : null;
   return {
-    title: info.title || "Unknown title",
-    author: info.author || "Unknown artist",
+    title: identity?.title || info.title || "Unknown title",
+    author: identity?.artist || info.author || "Unknown artist",
     uri: info.uri || "",
-    artworkUrl: info.artworkUrl || "",
-    durationMs: Number.isFinite(info.length) ? info.length : 0,
+    artworkUrl: identity?.artworkUrl || info.artworkUrl || "",
+    durationMs: identity?.durationMs || (Number.isFinite(info.length) ? info.length : 0),
     sourceName: info.sourceName || "unknown",
     identifier: info.identifier || "",
     isStream: Boolean(info.isStream),
     encoded: track.encoded || track.track,
     requesterId,
+    requestedQuery: identity?.requestedQuery || "",
+    playbackIdentity: identity,
+    playbackCandidateTitle: info.title || "Unknown title",
+    playbackCandidateAuthor: info.author || "Unknown artist",
+    fallbackTriedKeys: [],
+    fallbackAttemptCount: 0,
   };
 }
 
@@ -145,9 +169,7 @@ async function resolveSearchText(resolve, text, attempts, prefixes = DEFAULT_SEA
 
   for (const prefix of prefixes) {
     const result = await resolveIdentifier(resolve, `${prefix}:${query}`, attempts);
-    if (result.tracks.length) {
-      return { track: result.tracks[0], source: prefix };
-    }
+    if (result.tracks.length) return { track: result.tracks[0], source: prefix };
   }
   return null;
 }
@@ -165,9 +187,7 @@ async function expandRedirectUrl(fetchImpl, url, timeoutMs = REQUEST_TIMEOUT_MS)
       },
       signal: controller.signal,
     });
-    if (!response.ok) {
-      throw new Error(`Short-link expansion failed with HTTP ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`Short-link expansion failed with HTTP ${response.status}`);
     const expanded = String(response.url || "").trim();
     const parsed = parseUrl(expanded);
     if (!parsed || cleanHost(parsed.hostname) !== "open.spotify.com") {
@@ -192,9 +212,7 @@ async function fetchJson(fetchImpl, url, timeoutMs = REQUEST_TIMEOUT_MS) {
       },
       signal: controller.signal,
     });
-    if (!response.ok) {
-      throw new Error(`Metadata request failed with HTTP ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`Metadata request failed with HTTP ${response.status}`);
     return await response.json();
   } finally {
     clearTimeout(timer);
@@ -212,16 +230,16 @@ function appleLinkDetails(value) {
   const finalSegment = segments.at(-1) || "";
   const selectedSongId = url.searchParams.get("i");
 
-  if (selectedSongId && /^\d+$/.test(selectedSongId)) {
-    return { type: "song", id: selectedSongId, storefront };
-  }
+  if (selectedSongId && /^\d+$/.test(selectedSongId)) return { type: "song", id: selectedSongId, storefront };
   if ((type === "song" || type === "album") && /^\d+$/.test(finalSegment)) {
     return { type, id: finalSegment, storefront };
   }
-  if (type === "playlist") {
-    return { type: "playlist", id: finalSegment, storefront };
-  }
+  if (type === "playlist") return { type: "playlist", id: finalSegment, storefront };
   return { type: "unknown", id: finalSegment, storefront };
+}
+
+function highResolutionAppleArtwork(value) {
+  return String(value || "").replace(/\/\d+x\d+(?:bb)?\./i, "/1200x1200bb.");
 }
 
 function appleTrackMetadata(payload) {
@@ -229,9 +247,12 @@ function appleTrackMetadata(payload) {
   return results
     .filter((item) => item && item.wrapperType === "track" && item.trackName)
     .map((item) => ({
+      id: String(item.trackId || ""),
       title: item.trackName,
       artist: item.artistName || "",
       album: item.collectionName || "",
+      artworkUrl: highResolutionAppleArtwork(item.artworkUrl100 || item.artworkUrl60 || ""),
+      sourceUrl: item.trackViewUrl || "",
       durationMs: Number.isFinite(item.trackTimeMillis) ? item.trackTimeMillis : 0,
     }));
 }
@@ -258,6 +279,20 @@ async function resolveMetadataCollection({ resolve, metadata, attempts, limit = 
   const matches = await mapWithConcurrency(selected, 3, async (item) => {
     const searchText = buildSearchText(item);
     const match = await resolveSearchText(resolve, searchText, attempts);
+    if (match?.track) {
+      attachTrackIdentity(match.track, {
+        title: item.title,
+        artist: item.artist,
+        album: item.album,
+        artworkUrl: item.artworkUrl,
+        durationMs: item.durationMs,
+        durationTrusted: true,
+        sourceType: "apple-music",
+        sourceId: item.id,
+        sourceUrl: item.sourceUrl,
+        requestedQuery: searchText,
+      });
+    }
     return { item, searchText, match };
   });
 
@@ -283,8 +318,7 @@ async function resolveAppleMusic(value, { resolve, fetchImpl, attempts }) {
   if (details.type === "playlist") {
     throw new MusicResolutionError("Apple Music playlist expansion requires Apple Music API credentials.", {
       code: "APPLE_PLAYLIST_CREDENTIALS_REQUIRED",
-      userMessage:
-        "Apple Music playlists still require Apple Music API credentials. Song and album links work without them.",
+      userMessage: "Apple Music playlists still require Apple Music API credentials. Song and album links work without them.",
       attempts,
     });
   }
@@ -339,8 +373,7 @@ function spotifyLinkType(value) {
   const url = parseUrl(value);
   if (!url) return null;
   const segments = url.pathname.split("/").filter(Boolean).filter((segment) => !/^intl-[a-z]{2}$/i.test(segment));
-  const type = segments.find((segment) => ["track", "episode", "album", "playlist", "artist", "show"].includes(segment));
-  return type || null;
+  return segments.find((segment) => ["track", "episode", "album", "playlist", "artist", "show"].includes(segment)) || null;
 }
 
 async function resolveSpotify(value, { resolve, fetchImpl, attempts }) {
@@ -363,8 +396,7 @@ async function resolveSpotify(value, { resolve, fetchImpl, attempts }) {
   if (!["track", "episode"].includes(type)) {
     throw new MusicResolutionError("Spotify collection expansion requires Spotify API credentials.", {
       code: "SPOTIFY_COLLECTION_CREDENTIALS_REQUIRED",
-      userMessage:
-        "Without Spotify API credentials, Stoney Music can resolve individual Spotify tracks and episodes—not full albums or playlists.",
+      userMessage: "Without Spotify API credentials, Stoney Music can resolve individual Spotify tracks and episodes—not full albums or playlists.",
       attempts,
     });
   }
@@ -400,24 +432,42 @@ async function resolveSpotify(value, { resolve, fetchImpl, attempts }) {
     });
   }
 
+  attachTrackIdentity(match.track, {
+    title: payload?.title || match.track.info?.title,
+    artist: payload?.author_name || match.track.info?.author,
+    artworkUrl: payload?.thumbnail_url || "",
+    durationMs: match.track.info?.length || 0,
+    durationTrusted: false,
+    sourceType: "spotify",
+    sourceUrl: canonicalUrl,
+    requestedQuery: searchText,
+  });
   return { tracks: [match.track], source: "spotify-oembed", playlistName: null, notices: [] };
+}
+
+function manualSearchIdentity(query, track) {
+  const info = track?.info || {};
+  const value = String(query || "").trim();
+  const separator = value.match(/^(.+?)\s+-\s+(.+)$/);
+  return normalizeIdentity({
+    title: separator?.[2] || info.title || value,
+    artist: separator?.[1] || info.author || "",
+    artworkUrl: info.artworkUrl || "",
+    durationMs: Number.isFinite(info.length) ? info.length : 0,
+    durationTrusted: false,
+    sourceType: "manual-search",
+    sourceId: info.identifier || "",
+    sourceUrl: info.uri || "",
+    requestedQuery: value,
+  });
 }
 
 async function resolveMusicQuery(
   query,
-  {
-    resolve,
-    fetchImpl = globalThis.fetch,
-    searchPrefixes = DEFAULT_SEARCH_PREFIXES,
-    maxPlaylistTracks = MAX_PLAYLIST_TRACKS,
-  } = {}
+  { resolve, fetchImpl = globalThis.fetch, searchPrefixes = DEFAULT_SEARCH_PREFIXES, maxPlaylistTracks = MAX_PLAYLIST_TRACKS } = {}
 ) {
-  if (typeof resolve !== "function") {
-    throw new TypeError("resolve must be a function");
-  }
-  if (typeof fetchImpl !== "function") {
-    throw new TypeError("fetchImpl must be a function");
-  }
+  if (typeof resolve !== "function") throw new TypeError("resolve must be a function");
+  if (typeof fetchImpl !== "function") throw new TypeError("fetchImpl must be a function");
 
   const value = String(query || "").trim();
   const attempts = [];
@@ -442,22 +492,32 @@ async function resolveMusicQuery(
   if (isHttpUrl(value)) {
     const result = await resolveIdentifier(resolve, value, attempts);
     if (result.tracks.length) {
+      for (const track of result.tracks) {
+        const info = track.info || {};
+        attachTrackIdentity(track, {
+          title: info.title,
+          artist: info.author,
+          artworkUrl: info.artworkUrl,
+          durationMs: info.length,
+          durationTrusted: false,
+          sourceType: "direct-link",
+          sourceId: info.identifier,
+          sourceUrl: value,
+          requestedQuery: value,
+        });
+      }
       return {
         tracks: result.tracks.slice(0, maxPlaylistTracks),
         source: "direct",
         playlistName: result.playlistInfo?.name || null,
-        notices:
-          result.tracks.length > maxPlaylistTracks
-            ? [`Only the first ${maxPlaylistTracks} tracks were queued.`]
-            : [],
+        notices: result.tracks.length > maxPlaylistTracks ? [`Only the first ${maxPlaylistTracks} tracks were queued.`] : [],
         attempts,
       };
     }
 
     throw new MusicResolutionError("The direct link returned no playable tracks.", {
       code: result.loadType === "error" ? "DIRECT_LOAD_FAILED" : "DIRECT_EMPTY",
-      userMessage:
-        "That link did not return playable audio. It may be private, age-restricted, region-blocked, or temporarily blocked by the source.",
+      userMessage: "That link did not return playable audio. It may be private, age-restricted, region-blocked, or temporarily blocked by the source.",
       attempts,
     });
   }
@@ -471,6 +531,7 @@ async function resolveMusicQuery(
     });
   }
 
+  attachTrackIdentity(match.track, manualSearchIdentity(value, match.track));
   return { tracks: [match.track], source: match.source, playlistName: null, notices: [], attempts };
 }
 
@@ -480,10 +541,14 @@ module.exports = {
   MAX_PLAYLIST_TRACKS,
   MusicResolutionError,
   appleLinkDetails,
+  appleTrackMetadata,
+  attachTrackIdentity,
   canonicalLoadType,
   hasEncodedTrack,
   isAppleMusicUrl,
   isSpotifyUrl,
+  manualSearchIdentity,
+  normalizeIdentity,
   normalizeLoadResult,
   resolveMusicQuery,
   spotifyLinkType,
