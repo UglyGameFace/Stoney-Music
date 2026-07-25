@@ -36,3 +36,5 @@ data/guild-config.json
 data/guild-config.json.tmp
 data/playback-match-cache.json
 data/playback-match-cache.json.tmp
+data/provider-health.json
+data/provider-health.json.tmp
