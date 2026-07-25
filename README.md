@@ -62,7 +62,7 @@ Local Lavalink defaults:
 ## Validate
 
 ```bash
-npm install
+npm ci
 npm run validate
 ```
 
@@ -89,7 +89,7 @@ The first startup also downloads the pinned YouTube source plugin from the offic
 The included `discloud.config`:
 
 - installs `tools`, `ffmpeg`, and Java;
-- installs Node dependencies;
+- installs the exact dependency tree from `package-lock.json`;
 - runs `bash start.sh`;
 - allocates 2 GB RAM.
 
