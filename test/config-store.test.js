@@ -54,6 +54,16 @@ test("recording a recovery panel does not count as completed music setup", async
   assert.equal(store.get("123").setupPanelMessageId, "222");
 });
 
+test("legacy environment channel defaults are ignored until setup explicitly saves a channel", async () => {
+  const store = new GuildConfigStore({
+    filePath: path.join(os.tmpdir(), `missing-stoney-${Date.now()}.json`),
+    defaults: { musicTextChannelId: "old-channel" },
+  });
+  await store.load();
+  assert.equal(store.get("123").musicTextChannelId, null);
+  assert.equal(store.hasSavedSetup("123"), false);
+});
+
 test("setup stores no role gate when roles are not explicitly selected", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stoney-config-clear-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
