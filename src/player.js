@@ -10,6 +10,12 @@ const {
   resolvePlaybackFallback,
 } = require("./playback-fallback");
 const {
+  ProviderHealthStore,
+  isYoutubeHostWideBlock,
+  normalizeNodeKey,
+  providerForSearchIdentifier,
+} = require("./provider-health");
+const {
   DEFAULT_PLAYBACK_START_TIMEOUT_MS,
 } = require("./resilient-guild-player");
 const {
@@ -114,10 +120,15 @@ function candidateLevelRetryTrack(track = {}) {
     ...track,
     playbackIdentity: track.playbackIdentity ? { ...track.playbackIdentity } : track.playbackIdentity,
     fallbackFrom: track.fallbackFrom || track.sourceName || "unknown",
-    // resolvePlaybackFallback historically skipped the entire failed provider.
-    // Mark the failed item as a candidate so tried/dead keys—not the provider—control retries.
+    // Candidate identity/dead keys control retries. Provider-wide blocking is handled separately
+    // by the node-scoped health circuit when the failure is a host-wide challenge.
     sourceName: "failed-candidate",
   };
+}
+
+function trackUsesProvider(track = {}, provider) {
+  const source = String(track.sourceName || track.fallbackSource || "").toLowerCase();
+  return provider === "youtube" ? source.includes("youtube") : source.includes(String(provider || ""));
 }
 
 class PlayerManager {
@@ -126,6 +137,22 @@ class PlayerManager {
     this.logger = logger;
     this.playbackCache = new PlaybackMatchCache({ logger });
     this.playbackCacheReady = this.playbackCache.load();
+    this.providerHealth = new ProviderHealthStore({
+      nodeKey: normalizeNodeKey(nodes),
+      logger,
+    });
+    this._providerSkipLoggedUntil = new Map();
+    this.providerHealthReady = this.providerHealth.load().then((store) => {
+      if (store.isBlocked("youtube")) {
+        this.logger.warn?.("🚫 YouTube circuit restored as open for this Lavalink node", {
+          node: store.nodeKey,
+          retryInMs: store.remainingMs("youtube"),
+          reason: store.reason("youtube"),
+        });
+      }
+      return store;
+    });
+
     const configuredStartTimeout = Number(process.env.PLAYBACK_START_TIMEOUT_MS);
     this.playbackStartTimeoutMs = Number.isFinite(configuredStartTimeout) && configuredStartTimeout >= 1_000
       ? Math.round(configuredStartTimeout)
@@ -134,7 +161,7 @@ class PlayerManager {
     this.logger.log?.(
       `🧬 Playback engine loaded: ${PLAYBACK_ENGINE_BUILD} ` +
         `(start watchdog ${this.playbackStartTimeoutMs}ms, stable mirror verification, ` +
-        `loadFailed routing and sequential provider retries enabled)`
+        `provider circuit breaker and sequential retries enabled)`
     );
 
     this.shoukaku = new Shoukaku(connector, nodes, {
@@ -172,6 +199,8 @@ class PlayerManager {
           resolveAutoplay: (seed, context) => this.resolveAutoplay(seed, context),
           onFallbackVerified: (track) => this.rememberVerifiedFallback(track),
           onFallbackFailed: (track, reason) => this.rememberFailedFallback(track, reason),
+          onProviderFailure: (track, event, message) =>
+            this.noteProviderFailure(track, event, message),
           playbackStartTimeoutMs: this.playbackStartTimeoutMs,
         })
       );
@@ -193,16 +222,59 @@ class PlayerManager {
     return node.rest.resolve(identifier);
   }
 
+  async noteProviderFailure(track, event, shortMessage = "") {
+    await this.providerHealthReady;
+    if (!isYoutubeHostWideBlock(track, event, shortMessage)) return false;
+
+    const blockedUntil = await this.providerHealth.block(
+      "youtube",
+      "All YouTube clients were challenged for login/not-a-bot verification."
+    );
+    this._providerSkipLoggedUntil.delete("youtube");
+    this.logger.warn?.("🚫 YouTube circuit opened for this Lavalink node", {
+      node: this.providerHealth.nodeKey,
+      blockedUntil: new Date(blockedUntil).toISOString(),
+      cooldownMs: this.providerHealth.youtubeCooldownMs,
+      action: "YouTube and YouTube Music will be skipped until the cooldown expires.",
+    });
+    return true;
+  }
+
+  async resolveWithProviderHealth(identifier) {
+    await this.providerHealthReady;
+    const provider = providerForSearchIdentifier(identifier);
+    if (provider && this.providerHealth.isBlocked(provider)) {
+      const blockedUntil = this.providerHealth.blockedUntil(provider);
+      if (this._providerSkipLoggedUntil.get(provider) !== blockedUntil) {
+        this._providerSkipLoggedUntil.set(provider, blockedUntil);
+        this.logger.warn?.(`⏭️ Skipping ${provider} while its node circuit is open`, {
+          node: this.providerHealth.nodeKey,
+          retryInMs: this.providerHealth.remainingMs(provider),
+          identifierType: String(identifier || "").split(":", 1)[0],
+        });
+      }
+      return { loadType: "empty", data: [] };
+    }
+    return this.resolve(identifier);
+  }
+
   async resolveFallback(track, options = {}) {
-    await this.playbackCacheReady;
+    await Promise.all([this.playbackCacheReady, this.providerHealthReady]);
     const identityKey = fallbackIdentityKey(track);
     const cached = this.playbackCache.get(identityKey, { requesterId: track.requesterId });
+    const youtubeBlocked = this.providerHealth.isBlocked("youtube");
+    const prefixes = (options.prefixes || PRODUCTION_FALLBACK_PREFIXES).filter(
+      (prefix) => !(youtubeBlocked && providerForSearchIdentifier(`${prefix}:x`) === "youtube")
+    );
+    const cachedCandidates =
+      cached && !(youtubeBlocked && trackUsesProvider(cached, "youtube")) ? [cached] : [];
+
     const result = await resolvePlaybackFallback(candidateLevelRetryTrack(track), {
       ...options,
-      prefixes: options.prefixes || PRODUCTION_FALLBACK_PREFIXES,
-      cachedCandidates: cached ? [cached] : [],
+      prefixes,
+      cachedCandidates,
       deadKeys: this.playbackCache.deadKeys(),
-      resolve: (identifier) => this.resolve(identifier),
+      resolve: (identifier) => this.resolveWithProviderHealth(identifier),
     });
     return filterUnrequestedFastFallback(track, result);
   }
@@ -225,17 +297,17 @@ class PlayerManager {
     return resolveAutoplayRecommendation(seed, {
       ...options,
       logger: this.logger,
-      resolve: (identifier) => this.resolve(identifier),
+      resolve: (identifier) => this.resolveWithProviderHealth(identifier),
     });
   }
 
   async resolveQuery(query, options = {}) {
     const resolution = await resolveMusicQuery(query, {
       ...options,
-      resolve: (identifier) => this.resolve(identifier),
+      resolve: (identifier) => this.resolveWithProviderHealth(identifier),
     });
     const refined = await refineInitialResolution(resolution, query, {
-      resolve: (identifier) => this.resolve(identifier),
+      resolve: (identifier) => this.resolveWithProviderHealth(identifier),
     });
     return filterUnrequestedFastResolution(refined, query);
   }
@@ -253,4 +325,5 @@ module.exports = {
   filterUnrequestedFastFallback,
   filterUnrequestedFastResolution,
   requestAllowsFastVersion,
+  trackUsesProvider,
 };
