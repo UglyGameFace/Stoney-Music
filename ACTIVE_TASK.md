@@ -40,7 +40,7 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - Confirmed that Discloud native environment variables are supported without a physical `.env` file.
 
 ## Validation status
-- JavaScript syntax check: passed for 19 files before the recovery-panel branch.
+- JavaScript syntax check: passed for 25 files after the recovery-panel merge.
 - Bash syntax check: passed.
 - `application.yml`: parsed and semantically checked.
 - Local regression/integration suite: 35/35 passed after the Discloud bootstrap repair.
@@ -55,24 +55,23 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - Bootstrap repair GitHub Actions run `30147546280`: passed on the implementation head with locked `npm ci`, 35/35 tests, runtime imports, and secret/runtime-file checks.
 - Exact final PR-head GitHub Actions run `30147578549`: passed with locked `npm ci`, 35/35 tests, runtime imports, and secret/runtime-file checks.
 - Persistent setup PR #5 passed GitHub Actions and was squash-merged as `7944d7babbc625ac7c28a0b5b8100c7d745e739c`.
-- Recovery-panel PR #6 is awaiting its exact hosted validation result.
+- Recovery-panel PR #6 passed GitHub Actions run `30150720854` with locked dependency installation, full validation, runtime imports, and publish-safety checks; it was squash-merged as `5d0cfdf3ede541490e89e18c5938dfad646921e2`.
 
 ## Cleanup status
 - Original backup remains untouched.
 - Published tree contains no `.env`, live token, Lavalink JAR, plugins, logs, caches, `node_modules`, or deployment archives.
 - Stale Lavalink/LavaSrc configuration and duplicate/obsolete resolver behavior were removed rather than retained as compatibility patches.
 - Validation PRs #1 and #2 were closed without merge; their trigger files never entered `main`.
-- Startup repair PR #3 and setup PR #5 were squash-merged after hosted validation.
+- Startup repair PR #3, setup PR #5, and recovery-panel PR #6 were squash-merged after hosted validation.
 
 ## Publication status
 - Sanitized source is published to `UglyGameFace/Stoney-Music` on `main`.
 - Deterministic dependency lock is committed.
-- Current production baseline on `main` is `7944d7babbc625ac7c28a0b5b8100c7d745e739c` pending recovery-panel validation and merge.
+- Current production baseline on `main` is `5d0cfdf3ede541490e89e18c5938dfad646921e2` plus this status-only record update.
 - The repository is currently public. No secrets were published, but the originally intended visibility was private.
 
 ## Remaining external gates
-- Pass the exact GitHub Actions run for recovery-panel PR #6 and merge it.
-- Redeploy the resulting `main` tree to Discloud while preserving native environment variables.
+- Redeploy the current `main` tree to Discloud while preserving native environment variables.
 - Press the posted **Set Up In This Channel** recovery button and confirm the saved channel has no role gate.
 - Run controlled live tests for text search, direct YouTube playback, YouTube playlists, Apple Music song/album matching, Spotify track/mobile-link matching, skip/loop behavior, failure recovery, and process cleanup.
 
