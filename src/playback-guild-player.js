@@ -3,12 +3,15 @@
 const { ResilientGuildPlayer } = require("./resilient-guild-player");
 
 const MIN_STABLE_PLAYBACK_POSITION_MS = 1_000;
-const PLAYBACK_ENGINE_BUILD = "resilient-v6-source-stability-watchdog";
+const PLAYBACK_ENGINE_BUILD = "resilient-v7-provider-circuit-breaker";
 const PREMATURE_END_REASONS = new Set(["finished", "cleanup"]);
 
 class PlaybackGuildPlayer extends ResilientGuildPlayer {
   constructor(...args) {
     super(...args);
+    const options = args[2] || {};
+    this.onProviderFailure =
+      typeof options.onProviderFailure === "function" ? options.onProviderFailure : null;
     this._fallbackVerificationState = null;
     this._playbackStatus = null;
   }
@@ -228,6 +231,17 @@ class PlaybackGuildPlayer extends ResilientGuildPlayer {
       }
       active._failureRecoveryClaimedRevision = revision;
       this._clearFallbackVerification(active.encoded);
+
+      try {
+        await this.onProviderFailure?.(active, event, this._shortErrorMessage(event));
+      } catch (error) {
+        this.logger.warn?.("Could not update provider health after playback failure", {
+          guildId: this.guildId,
+          source: active.sourceName,
+          message: error?.message || String(error),
+        });
+      }
+
       this._setPlaybackStatus(
         "recovering",
         "The current source failed before stable audio. Searching for an exact playable mirror.",
