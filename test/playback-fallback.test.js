@@ -91,7 +91,21 @@ test("poor matches are rejected rather than playing the wrong song", async () =>
   assert.deepEqual(result.attempts, [{ source: "scsearch", loadType: "search", count: 1 }]);
 });
 
-test("non-YouTube and previously attempted tracks never launch another search", async () => {
+test("the player may pre-mark an item before calling the resolver", async () => {
+  let calls = 0;
+  const exact = lavalinkTrack("Kodak Black - Closure", "Kodak Black", 171_500);
+  const result = await resolvePlaybackFallback(queueTrack({ fallbackAttempted: true }), {
+    resolve: async () => {
+      calls += 1;
+      return { loadType: "search", data: [exact] };
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.track.encoded, exact.encoded);
+});
+
+test("non-YouTube tracks never launch a YouTube recovery search", async () => {
   let calls = 0;
   const resolve = async () => {
     calls += 1;
@@ -105,7 +119,6 @@ test("non-YouTube and previously attempted tracks never launch another search", 
     ),
     null
   );
-  assert.equal(await resolvePlaybackFallback(queueTrack({ fallbackAttempted: true }), { resolve }), null);
   assert.equal(calls, 0);
 });
 
