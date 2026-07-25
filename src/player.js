@@ -1,12 +1,13 @@
 "use strict";
 
-const { Shoukaku, Connectors } = require("shoukaku");
+const { Shoukaku } = require("shoukaku");
 const { GuildPlayer } = require("./guild-player");
 const { resolveMusicQuery } = require("./resolver");
+const { StableDiscordJSConnector } = require("./voice-connector");
 
 class PlayerManager {
   constructor({ nodes, discordClient, logger = console }) {
-    const connector = new Connectors.DiscordJS(discordClient);
+    const connector = new StableDiscordJSConnector(discordClient, { logger });
     this.logger = logger;
 
     this.shoukaku = new Shoukaku(connector, nodes, {
@@ -14,6 +15,7 @@ class PlayerManager {
       reconnectInterval: 5_000,
       resume: true,
       resumeTimeout: 30,
+      voiceConnectionTimeout: 20,
     });
 
     this.shoukaku.on("ready", (name, resumed) =>
