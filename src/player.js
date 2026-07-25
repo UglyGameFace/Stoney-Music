@@ -19,6 +19,8 @@ const {
 const { resolveMusicQuery } = require("./resolver");
 const { StableDiscordJSConnector } = require("./voice-connector");
 
+const PRODUCTION_FALLBACK_PREFIXES = Object.freeze(["scsearch", "ytmsearch", "ytsearch"]);
+
 class PlayerManager {
   constructor({ nodes, discordClient, logger = console }) {
     const connector = new StableDiscordJSConnector(discordClient, { logger });
@@ -32,7 +34,8 @@ class PlayerManager {
 
     this.logger.log?.(
       `🧬 Playback engine loaded: ${PLAYBACK_ENGINE_BUILD} ` +
-        `(start watchdog ${this.playbackStartTimeoutMs}ms, loadFailed routing and sequential provider retries enabled)`
+        `(start watchdog ${this.playbackStartTimeoutMs}ms, stable mirror verification, ` +
+        `loadFailed routing and sequential provider retries enabled)`
     );
 
     this.shoukaku = new Shoukaku(connector, nodes, {
@@ -97,6 +100,7 @@ class PlayerManager {
     const cached = this.playbackCache.get(identityKey, { requesterId: track.requesterId });
     return resolvePlaybackFallback(track, {
       ...options,
+      prefixes: options.prefixes || PRODUCTION_FALLBACK_PREFIXES,
       cachedCandidates: cached ? [cached] : [],
       deadKeys: this.playbackCache.deadKeys(),
       resolve: (identifier) => this.resolve(identifier),
@@ -140,5 +144,6 @@ module.exports = {
   GuildPlayer: PlaybackGuildPlayer,
   PlayerManager,
   PlaybackGuildPlayer,
+  PRODUCTION_FALLBACK_PREFIXES,
   ResilientGuildPlayer: PlaybackGuildPlayer,
 };
