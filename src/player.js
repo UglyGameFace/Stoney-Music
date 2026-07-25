@@ -2,6 +2,7 @@
 
 const { Shoukaku } = require("shoukaku");
 const { GuildPlayer } = require("./guild-player");
+const { resolvePlaybackFallback } = require("./playback-fallback");
 const { resolveMusicQuery } = require("./resolver");
 const { StableDiscordJSConnector } = require("./voice-connector");
 
@@ -36,7 +37,13 @@ class PlayerManager {
 
   get(guildId) {
     if (!this.guildPlayers.has(guildId)) {
-      this.guildPlayers.set(guildId, new GuildPlayer(this.shoukaku, guildId, { logger: this.logger }));
+      this.guildPlayers.set(
+        guildId,
+        new GuildPlayer(this.shoukaku, guildId, {
+          logger: this.logger,
+          resolveFallback: (track) => this.resolveFallback(track),
+        })
+      );
     }
     return this.guildPlayers.get(guildId);
   }
@@ -49,6 +56,13 @@ class PlayerManager {
     const node = this._node();
     if (!node) throw new Error("No Lavalink node is ready.");
     return node.rest.resolve(identifier);
+  }
+
+  async resolveFallback(track, options = {}) {
+    return resolvePlaybackFallback(track, {
+      ...options,
+      resolve: (identifier) => this.resolve(identifier),
+    });
   }
 
   async resolveQuery(query, options = {}) {
