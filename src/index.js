@@ -19,7 +19,12 @@ const { buildCommands } = require("./commands");
 const { syncApplicationCommands } = require("./command-sync");
 const { GuildConfigStore } = require("./config-store");
 const { enforceGuards } = require("./guards");
-const { safeTrackDescription } = require("./format");
+const { escapeDiscordMarkdown, safeTrackDescription } = require("./format");
+const {
+  PlayerControllerManager,
+  buildQueuePayload,
+  formatDuration,
+} = require("./player-controller");
 const { PlayerManager } = require("./player");
 const { MusicResolutionError, toQueueTrack } = require("./resolver");
 const { handleSetupPanelInteraction, postSetupPanels } = require("./setup-panel");
@@ -36,13 +41,37 @@ function sanitizeHost(raw) {
     .replace(/\/+$/, "");
 }
 
+function parseSeekPosition(value) {
+  const text = String(value || "").trim();
+  if (!text) throw new Error("Enter a seek position.");
+  const parts = text.split(":");
+  if (parts.length > 3 || parts.some((part) => !/^\d+$/.test(part))) {
+    throw new Error("Use seconds or a time like 1:30 or 1:02:15.");
+  }
+  const numbers = parts.map(Number);
+  let seconds = 0;
+  for (const number of numbers) seconds = seconds * 60 + number;
+  if (!Number.isSafeInteger(seconds) || seconds < 0) throw new Error("That seek position is invalid.");
+  return seconds * 1_000;
+}
+
 function publicErrorMessage(error) {
   if (error instanceof MusicResolutionError) return error.userMessage;
-  if (error?.message === "The bot is already connected to another voice channel.") {
+  const message = String(error?.message || "");
+  if (message === "The bot is already connected to another voice channel.") {
     return "Join the same voice channel as Stoney Music first.";
   }
-  if (error?.message === "No Lavalink node is ready.") {
+  if (message === "No Lavalink node is ready.") {
     return "The audio server is still connecting. Try again in a moment.";
+  }
+  if (
+    message === "Nothing is currently playing." ||
+    message === "Live streams cannot be seeked." ||
+    message.includes("queue position is out of range") ||
+    message.includes("seek position") ||
+    message.includes("time like")
+  ) {
+    return message;
   }
   return "Playback failed unexpectedly. The detailed cause was written to the bot logs.";
 }
@@ -50,11 +79,25 @@ function publicErrorMessage(error) {
 async function sendInteractionError(interaction, error) {
   const content = `❌ ${publicErrorMessage(error)}`;
   if (interaction.deferred) {
-    await interaction.editReply({ content, embeds: [] });
+    await interaction.editReply({ content, embeds: [], components: [] });
   } else if (interaction.replied) {
     await interaction.followUp({ content, flags: MessageFlags.Ephemeral });
   } else {
     await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+  }
+}
+
+async function sendComponentError(interaction, error) {
+  const payload = {
+    content: `❌ ${publicErrorMessage(error)}`,
+    flags: MessageFlags.Ephemeral,
+  };
+  if (interaction.isModalSubmit?.() && interaction.deferred && !interaction.replied) {
+    await interaction.editReply({ content: payload.content, components: [], embeds: [] });
+  } else if (interaction.deferred || interaction.replied) {
+    await interaction.followUp(payload);
+  } else {
+    await interaction.reply(payload);
   }
 }
 
@@ -68,14 +111,9 @@ async function sendSetupPanelError(interaction) {
   else await interaction.reply(payload);
 }
 
-function autoplayLabel(guildPlayer) {
-  return guildPlayer.autoplayStatus() ? "♾️ Autoplay: On" : "♾️ Autoplay: Off";
-}
-
-function trackOriginLabel(track) {
-  if (!track?.autoplay) return null;
-  const seed = [track.autoplaySeedAuthor, track.autoplaySeedTitle].filter(Boolean).join(" — ");
-  return seed ? `Recommended from ${seed}` : "Autoplay recommendation";
+function requireSameVoice(interaction, guildPlayer) {
+  const memberVoice = interaction.member?.voice?.channelId || interaction.member?.voice?.channel?.id;
+  return Boolean(guildPlayer.isConnected() && memberVoice && guildPlayer.isInVoiceChannel(memberVoice));
 }
 
 const cfg = {
@@ -129,11 +167,13 @@ const client = new Client({
 });
 
 let players = null;
+let controllers = null;
 
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   await configStore.load();
   players = new PlayerManager({ nodes, discordClient: client });
+  controllers = new PlayerControllerManager({ client, players, logger: console });
 
   const rest = new REST({ version: "10" }).setToken(cfg.token);
   const commands = buildCommands();
@@ -224,6 +264,74 @@ async function handleSetup(interaction) {
   );
 }
 
+async function handleAdvancedPlayerCommand(interaction, guildPlayer) {
+  const subcommand = interaction.options.getSubcommand(true);
+
+  if (subcommand === "show") {
+    await controllers.show(interaction, guildPlayer);
+    return;
+  }
+
+  if (!guildPlayer.isConnected()) {
+    await interaction.reply({
+      content: "Nothing is playing. Start a song first.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  if (!requireSameVoice(interaction, guildPlayer)) {
+    await interaction.reply({
+      content: "Join the same voice channel as Stoney Music to control playback.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  let status;
+  if (subcommand === "pause") {
+    status = (await guildPlayer.setPaused(true)) ? "⏸️ Paused." : "Nothing is currently playing.";
+  } else if (subcommand === "resume") {
+    await guildPlayer.setPaused(false);
+    status = "▶️ Resumed.";
+  } else if (subcommand === "seek") {
+    const target = await guildPlayer.seekTo(
+      parseSeekPosition(interaction.options.getString("position", true))
+    );
+    status = `⏩ Seeked to **${formatDuration(target)}**.`;
+  } else if (subcommand === "previous") {
+    const previous = await guildPlayer.previous();
+    status = previous
+      ? `⏮️ Playing **${escapeDiscordMarkdown(previous.title)}**.`
+      : "No previous track is available.";
+  } else if (subcommand === "replay") {
+    status = (await guildPlayer.replay()) ? "🔄 Replaying the current track." : "Nothing is playing.";
+  } else if (subcommand === "shuffle") {
+    status = `🔀 Shuffled **${guildPlayer.shuffle()}** queued tracks.`;
+  } else if (subcommand === "remove") {
+    const position = interaction.options.getInteger("position", true);
+    const removed = guildPlayer.removeQueueTrack(position);
+    status = `➖ Removed **${escapeDiscordMarkdown(removed.title)}** from position ${position}.`;
+  } else if (subcommand === "move") {
+    const position = interaction.options.getInteger("position", true);
+    const destination = interaction.options.getInteger("destination", true);
+    const moved = guildPlayer.moveQueueTrack(position, destination);
+    status = `↕️ Moved **${escapeDiscordMarkdown(moved.title)}** from ${position} to ${destination}.`;
+  } else if (subcommand === "clear") {
+    const removed = guildPlayer.clearQueue();
+    status = `🧹 Cleared **${removed}** upcoming track${removed === 1 ? "" : "s"}.`;
+  } else if (subcommand === "mute") {
+    status = `🔇 Volume is now **${await guildPlayer.toggleMute()}%**.`;
+  } else if (subcommand === "disconnect") {
+    await guildPlayer.disconnect();
+    status = "⏏️ Disconnected and cleared the player session.";
+  } else {
+    throw new Error("Unknown player subcommand.");
+  }
+
+  await interaction.reply(status);
+  await controllers.refresh(interaction.guildId, { notice: status });
+}
+
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (await handleSetupPanelInteraction(interaction, { configStore, logger: console })) return;
@@ -231,6 +339,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
     console.error("Stoney Music recovery setup failed:", error?.stack || error);
     await sendSetupPanelError(interaction);
     return;
+  }
+
+  if (controllers) {
+    try {
+      if (await controllers.handle(interaction)) return;
+    } catch (error) {
+      console.error("Stoney Music player control failed:", {
+        guildId: interaction.guildId,
+        userId: interaction.user?.id,
+        customId: interaction.customId,
+        message: error?.message || String(error),
+        stack: error?.stack,
+      });
+      await sendComponentError(interaction, error);
+      return;
+    }
   }
 
   if (!interaction.isChatInputCommand()) return;
@@ -245,7 +369,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  if (!players) {
+  if (!players || !controllers) {
     await interaction.reply({
       content: "Stoney Music is still starting. Try again in a moment.",
       flags: MessageFlags.Ephemeral,
@@ -299,95 +423,55 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const started = await guildPlayer.playNext();
       const first = tracks[0];
       const startedFirst = wasIdle && started?.encoded === first?.encoded;
+      const status = startedFirst
+        ? `▶️ Now playing ${first.title}.`
+        : tracks.length > 1
+          ? `➕ Added ${tracks.length} tracks to the queue.`
+          : `➕ Added ${first.title} to the queue.`;
 
-      const title = startedFirst ? "▶️ Now Playing" : "➕ Added to Queue";
-      const countText = tracks.length > 1 ? `\n\n**Queued:** ${tracks.length} tracks` : "";
-      const sourceText = resolution.playlistName
-        ? `Source: ${resolution.playlistName}`
-        : `Resolver: ${resolution.source}`;
+      await controllers.publish(interaction, guildPlayer, { notice: status });
+      return;
+    }
 
-      const embed = new EmbedBuilder()
-        .setTitle(title)
-        .setDescription(`${safeTrackDescription(first)}${countText}`)
-        .addFields({ name: "Station", value: autoplayLabel(guildPlayer), inline: true })
-        .setFooter({ text: `${sourceText} • Requested by ${interaction.user.username}` });
-
-      if (first?.artworkUrl) embed.setThumbnail(first.artworkUrl);
-      if (resolution.notices?.length) {
-        embed.addFields({ name: "Note", value: resolution.notices.join("\n").slice(0, 1024) });
-      }
-
-      await interaction.editReply({ embeds: [embed] });
+    if (interaction.commandName === "player") {
+      await handleAdvancedPlayerCommand(interaction, guildPlayer);
       return;
     }
 
     const controlsPlayback = ["skip", "stop", "autoplay", "volume", "loop", "filter"].includes(
       interaction.commandName
     );
-    if (controlsPlayback && guildPlayer.isConnected()) {
-      if (!voiceChannel || !guildPlayer.isInVoiceChannel(voiceChannel.id)) {
-        await interaction.reply({
-          content: "Join the same voice channel as Stoney Music to control playback.",
-          flags: MessageFlags.Ephemeral,
-        });
-        return;
-      }
+    if (controlsPlayback && guildPlayer.isConnected() && !requireSameVoice(interaction, guildPlayer)) {
+      await interaction.reply({
+        content: "Join the same voice channel as Stoney Music to control playback.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
     }
 
     if (interaction.commandName === "skip") {
       const skipped = await guildPlayer.skip();
-      await interaction.reply(skipped ? "⏭️ Skipped." : "Nothing is currently playing.");
+      const status = skipped ? "⏭️ Skipped." : "Nothing is currently playing.";
+      await interaction.reply(status);
+      await controllers.refresh(interaction.guildId, { notice: status });
       return;
     }
 
     if (interaction.commandName === "stop") {
       await guildPlayer.stopAndClear();
-      await interaction.reply("⏹️ Stopped, cleared the queue, and disabled autoplay.");
+      const status = "⏹️ Stopped, cleared the queue, and disabled autoplay.";
+      await interaction.reply(status);
+      await controllers.refresh(interaction.guildId, { notice: status });
       return;
     }
 
     if (interaction.commandName === "queue") {
-      const now = guildPlayer.nowPlaying();
-      const upcoming = guildPlayer.getQueuePreview(10);
-      const lines = [];
-
-      lines.push(now ? `**Now:** ${safeTrackDescription(now)}` : "**Now:** Nothing playing");
-      lines.push(`**${autoplayLabel(guildPlayer)}**`);
-      const origin = trackOriginLabel(now);
-      if (origin) lines.push(`_${origin}_`);
-      if (upcoming.length) {
-        lines.push("\n**Up Next:**");
-        upcoming.forEach((track, index) => lines.push(`${index + 1}. ${safeTrackDescription(track)}`));
-        const hidden = guildPlayer.queueLength() - upcoming.length;
-        if (hidden > 0) lines.push(`…and ${hidden} more.`);
-      } else {
-        lines.push(
-          guildPlayer.autoplayStatus()
-            ? "\nNo human-requested tracks are queued. Autoplay will choose related music."
-            : "\nNo upcoming tracks."
-        );
-      }
-
-      await interaction.reply({ content: lines.join("\n") });
+      await interaction.reply({ ...buildQueuePayload(guildPlayer, 0), flags: MessageFlags.Ephemeral });
       return;
     }
 
     if (interaction.commandName === "nowplaying") {
-      const now = guildPlayer.nowPlaying();
-      if (!now) {
-        await interaction.reply({ content: "Nothing is playing.", flags: MessageFlags.Ephemeral });
-        return;
-      }
-      const origin = trackOriginLabel(now);
-      await interaction.reply(
-        [
-          `🎶 **Now Playing:** ${safeTrackDescription(now)}`,
-          `**${autoplayLabel(guildPlayer)}**`,
-          origin ? `_${origin}_` : null,
-        ]
-          .filter(Boolean)
-          .join("\n")
-      );
+      await controllers.show(interaction, guildPlayer);
       return;
     }
 
@@ -401,32 +485,38 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
       const active = await guildPlayer.setAutoplay(enabled);
-      await interaction.reply(
-        active
-          ? "♾️ **Autoplay is on.** When the human queue ends, Stoney will continue with related music based on the latest song somebody requested."
-          : "♾️ **Autoplay is off.** Playback will stop when the human queue ends."
-      );
+      const status = active
+        ? "♾️ Autoplay is on. Related music will continue after the human queue ends."
+        : "♾️ Autoplay is off. Playback will stop when the human queue ends.";
+      await interaction.reply(status);
+      await controllers.refresh(interaction.guildId, { notice: status });
       return;
     }
 
     if (interaction.commandName === "volume") {
       const volume = interaction.options.getInteger("value", true);
       const actual = await guildPlayer.setVolume(volume);
-      await interaction.reply(`🔊 Volume set to **${actual}**.`);
+      const status = `🔊 Volume set to **${actual}%**.`;
+      await interaction.reply(status);
+      await controllers.refresh(interaction.guildId, { notice: status });
       return;
     }
 
     if (interaction.commandName === "loop") {
       const mode = interaction.options.getString("mode", true);
       await guildPlayer.setLoop(mode);
-      await interaction.reply(`🔁 Loop mode: **${mode}**.`);
+      const status = `🔁 Loop mode: **${mode}**.`;
+      await interaction.reply(status);
+      await controllers.refresh(interaction.guildId, { notice: status });
       return;
     }
 
     if (interaction.commandName === "filter") {
       const preset = interaction.options.getString("preset", true);
       await guildPlayer.setFilterPreset(preset);
-      await interaction.reply(`✨ Filter: **${preset}**.`);
+      const status = `✨ Filter: **${preset}**.`;
+      await interaction.reply(status);
+      await controllers.refresh(interaction.guildId, { notice: status });
       return;
     }
   } catch (error) {
