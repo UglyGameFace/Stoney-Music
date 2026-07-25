@@ -6,8 +6,17 @@ const { EventEmitter } = require("node:events");
 
 const { GuildPlayer } = require("../src/guild-player");
 
-function track(name) {
-  return { title: name, encoded: `encoded-${name}` };
+function track(name, overrides = {}) {
+  return {
+    title: name,
+    author: "Artist",
+    uri: "",
+    durationMs: 180_000,
+    sourceName: "youtube",
+    requesterId: "requester",
+    encoded: `encoded-${name}`,
+    ...overrides,
+  };
 }
 
 class FakePlayer extends EventEmitter {
@@ -46,13 +55,19 @@ class FakeShoukaku {
   }
 }
 
-async function connectedPlayer() {
+async function connectedPlayer(resolveFallback = null) {
   const fake = new FakePlayer();
+  const logs = [];
   const player = new GuildPlayer(new FakeShoukaku(fake), "guild", {
-    logger: { log() {}, warn() {}, error() {} },
+    logger: {
+      log: (...args) => logs.push(["log", ...args]),
+      warn: (...args) => logs.push(["warn", ...args]),
+      error: (...args) => logs.push(["error", ...args]),
+    },
+    resolveFallback,
   });
   await player.connect({ guildId: "guild", voiceChannelId: "voice", shardId: 0 });
-  return { player, fake };
+  return { player, fake, logs };
 }
 
 test("finished track repeats only when track loop is enabled", async () => {
@@ -91,6 +106,75 @@ test("track exception does not double-advance before loadFailed end", async () =
   await player._handleTrackEnd({ reason: "loadFailed" });
   assert.equal(player.nowPlaying().title, "two");
   assert.deepEqual(fake.played, ["encoded-one", "encoded-two"]);
+});
+
+test("blocked YouTube playback is replaced in place without advancing the queue", async () => {
+  const original = track("Kodak Black - Closure [Official Music Video]", {
+    author: "Kodak Black",
+    encoded: "youtube-closure",
+  });
+  const replacement = track("Kodak Black - Closure", {
+    author: "Kodak Black",
+    sourceName: "soundcloud",
+    uri: "https://soundcloud.com/example/closure",
+    encoded: "soundcloud-closure",
+    fallbackAttempted: true,
+  });
+  const next = track("next", { encoded: "youtube-next" });
+  let fallbackCalls = 0;
+  const { player, fake, logs } = await connectedPlayer(async (failed) => {
+    fallbackCalls += 1;
+    assert.equal(failed, original);
+    return { track: replacement, source: "scsearch", score: 0.98, attempts: [] };
+  });
+
+  player.enqueueMany([original, next]);
+  await player.playNext();
+  await player._handleTrackException({
+    track: { encoded: original.encoded },
+    exception: { message: "All clients failed: sign in to confirm you're not a bot" },
+  });
+
+  assert.equal(fallbackCalls, 1);
+  assert.equal(player.nowPlaying(), replacement);
+  assert.equal(player.queueLength(), 1);
+  assert.equal(player.getQueuePreview()[0], next);
+  assert.deepEqual(fake.played, ["youtube-closure", "soundcloud-closure"]);
+  assert.match(JSON.stringify(logs), /Recovered blocked playback/);
+
+  // Lavalink may still emit the failed YouTube track's terminal event after the
+  // replacement starts. It must be recognized as stale and ignored.
+  await player._handleTrackEnd({ reason: "loadFailed", track: { encoded: original.encoded } });
+  assert.equal(player.nowPlaying(), replacement);
+  assert.equal(player.queueLength(), 1);
+  assert.deepEqual(fake.played, ["youtube-closure", "soundcloud-closure"]);
+});
+
+test("an unavailable fallback lets loadFailed advance exactly once", async () => {
+  const original = track("blocked", { encoded: "youtube-blocked" });
+  const next = track("next", { encoded: "youtube-next" });
+  let fallbackCalls = 0;
+  const { player, fake } = await connectedPlayer(async () => {
+    fallbackCalls += 1;
+    return { track: null, score: 0.2, attempts: [{ source: "scsearch", count: 0 }] };
+  });
+
+  player.enqueueMany([original, next]);
+  await player.playNext();
+  await player._handleTrackException({
+    track: { encoded: original.encoded },
+    exception: { message: "source blocked" },
+  });
+  await player._handleTrackException({
+    track: { encoded: original.encoded },
+    exception: { message: "duplicate source error" },
+  });
+  await player._handleTrackEnd({ reason: "loadFailed", track: { encoded: original.encoded } });
+
+  assert.equal(fallbackCalls, 1, "the same failed track must not launch repeated provider searches");
+  assert.equal(player.nowPlaying(), next);
+  assert.equal(player.queueLength(), 0);
+  assert.deepEqual(fake.played, ["youtube-blocked", "youtube-next"]);
 });
 
 test("queue loop rotates a finished track to the back", async () => {
