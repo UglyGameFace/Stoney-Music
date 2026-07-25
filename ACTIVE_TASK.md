@@ -12,6 +12,7 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - Track-end reasons were ignored, allowing manual skip to replay under track-loop and allowing failure/end races to double-advance.
 - The old shell pipeline tracked `tee` instead of Java and `exec node` bypassed cleanup.
 - The backup contained a live `.env` and an obsolete generated Lavalink JAR; neither belongs in Git history.
+- The first GitHub run exposed a publish-audit false positive: it inspected the working tree after installation and treated untracked `node_modules/` as committed content.
 
 ## Implemented changes
 - Added one canonical resolver with correct Lavalink v4 parsing and bounded `ytsearch` → `ytmsearch` → `scsearch` fallback.
@@ -23,12 +24,15 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - Replaced the process launcher with actual Java/Node PID supervision and cleanup.
 - Added Discord markdown/mention/link sanitization for third-party track metadata.
 - Added secret-safe `.gitignore`, `.discloudignore`, `.env.example`, CI, deployment docs, and troubleshooting guidance.
+- Changed the publish audit to inspect Git-tracked files, ignoring installed-but-untracked dependencies while still rejecting committed dependencies, environment files, JARs, logs, backups, archives, tokens, and private keys.
+- Generated and committed a lockfile from GitHub's real npm installation.
+- Changed GitHub CI and Discloud builds to deterministic `npm ci` installs.
 
 ## Validation status
-- JavaScript syntax check: passed for 15 files.
+- JavaScript syntax check: passed for 16 files.
 - Bash syntax check: passed.
 - `application.yml`: parsed and semantically checked.
-- Regression/integration suite: 28/28 passed, including a final rerun after publication.
+- Local regression/integration suite: 31/31 passed after the final lockfile and audit changes.
 - Process-supervision integration test: passed and confirmed Lavalink cleanup after Node exit.
 - Exact-value scan against live secrets from the original backup: passed with no matches.
 - Generic Discord/GitHub token and private-key pattern scan: passed.
@@ -36,28 +40,24 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - Node 22.16.0 and Java 21 local validation environment confirmed.
 - discord.js 14.26.4 manifest confirms Node >=18; the configured Node 22 line is compatible.
 - Shoukaku source confirms the runtime APIs used by the bot: `getIdealNode`, `joinVoiceChannel`, `rest.resolve`, `playTrack`, `stopTrack`, `setGlobalVolume`, and `setFilters`.
-- Live Discord/Discloud playback smoke testing remains required because this environment has no bot token or voice connection.
+- GitHub Actions run `30146935379`: passed with `npm ci`, 31/31 tests, real Discord.js/Shoukaku imports, and committed-secret/runtime-file checks.
 
 ## Cleanup status
 - Original backup remains untouched.
 - Published tree contains no `.env`, live token, Lavalink JAR, plugins, logs, caches, `node_modules`, or deployment archives.
 - Stale Lavalink/LavaSrc configuration and duplicate/obsolete resolver behavior were removed rather than retained as compatibility patches.
+- Validation PRs #1 and #2 were closed without merge; their trigger files never entered `main`.
 
 ## Publication status
 - Sanitized source published to `UglyGameFace/Stoney-Music` on `main`.
-- Runtime baseline commit: `beb55b124bd3915327dbeb37a613989d26795a41`.
-- Validation-only draft PR: `#1`, branch `agent/validate-published-baseline`.
-- The repository is currently public. No secrets were published, but the intended repository visibility was private.
-
-## Current blockers
-- GitHub created no Actions check suite or workflow run after PR `opened`, branch `synchronize`, and PR `reopened` events. This points to repository/account Actions settings rather than a test failure—the workflow never began `npm install`.
-- The connected GitHub integration can publish source, branches, commits, and pull requests, but it cannot change repository visibility or enable repository Actions.
-- Real dependency installation therefore remains unverified in GitHub-hosted CI.
+- Final validated code/config head before this status-only update: `bc3ace53e3d8e830078c273c5c89dedbe89587b0`.
+- Deterministic dependency lock committed at `66eed491ec33b0382b7ad16148ddcba33fccf37b`.
+- The repository is currently public. No secrets were published, but the originally intended visibility was private.
 
 ## Remaining external gates
-- Enable GitHub Actions for this repository and rerun draft PR #1; do not merge its `VALIDATION_TRIGGER.md` file.
-- Change repository visibility to private if the source should not be public.
-- A controlled Discloud smoke test must verify text search, direct YouTube playback, YouTube playlists, Apple Music song/album matching, Spotify track/mobile-link matching, skip/loop behavior, failure recovery, and process cleanup.
+- Change repository visibility to private if the source should not remain public; the connected GitHub integration cannot change visibility.
+- Deploy the current `main` tree to Discloud with the required environment variables.
+- Run a controlled live smoke test for text search, direct YouTube playback, YouTube playlists, Apple Music song/album matching, Spotify track/mobile-link matching, skip/loop behavior, failure recovery, and process cleanup.
 
 ## Backlog
 - Full Spotify album/playlist expansion after valid Spotify application credentials become available.
