@@ -9,7 +9,11 @@ const {
   playbackCandidateKey,
   resolvePlaybackFallback,
 } = require("./playback-fallback");
-const { ResilientGuildPlayer } = require("./resilient-guild-player");
+const {
+  DEFAULT_PLAYBACK_START_TIMEOUT_MS,
+  PLAYBACK_ENGINE_BUILD,
+  ResilientGuildPlayer,
+} = require("./resilient-guild-player");
 const { resolveMusicQuery } = require("./resolver");
 const { StableDiscordJSConnector } = require("./voice-connector");
 
@@ -19,6 +23,15 @@ class PlayerManager {
     this.logger = logger;
     this.playbackCache = new PlaybackMatchCache({ logger });
     this.playbackCacheReady = this.playbackCache.load();
+    const configuredStartTimeout = Number(process.env.PLAYBACK_START_TIMEOUT_MS);
+    this.playbackStartTimeoutMs = Number.isFinite(configuredStartTimeout) && configuredStartTimeout >= 1_000
+      ? Math.round(configuredStartTimeout)
+      : DEFAULT_PLAYBACK_START_TIMEOUT_MS;
+
+    this.logger.log?.(
+      `🧬 Playback engine loaded: ${PLAYBACK_ENGINE_BUILD} ` +
+        `(start watchdog ${this.playbackStartTimeoutMs}ms, sequential provider retries enabled)`
+    );
 
     this.shoukaku = new Shoukaku(connector, nodes, {
       reconnectTries: 5,
@@ -55,6 +68,7 @@ class PlayerManager {
           resolveAutoplay: (seed, context) => this.resolveAutoplay(seed, context),
           onFallbackVerified: (track) => this.rememberVerifiedFallback(track),
           onFallbackFailed: (track, reason) => this.rememberFailedFallback(track, reason),
+          playbackStartTimeoutMs: this.playbackStartTimeoutMs,
         })
       );
     }

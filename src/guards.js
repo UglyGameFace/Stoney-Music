@@ -1,5 +1,7 @@
 "use strict";
 
+const { MessageFlags } = require("discord.js");
+
 function hasConfiguredRole(member, roleId, roleName) {
   if (!roleId && !roleName) return true;
   if (roleId && member.roles.cache.has(roleId)) return true;
@@ -14,14 +16,14 @@ function roleLabel(roleId, roleName) {
 
 async function enforceGuards(interaction, cfg) {
   if (!interaction.inGuild()) {
-    await interaction.reply({ content: "Server only.", ephemeral: true });
+    await interaction.reply({ content: "Server only.", flags: MessageFlags.Ephemeral });
     return false;
   }
 
   if (!cfg.musicTextChannelId) {
     await interaction.reply({
       content: "Stoney Music is not configured yet. A server admin needs to run `/setup`.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return false;
   }
@@ -29,14 +31,17 @@ async function enforceGuards(interaction, cfg) {
   if (interaction.channelId !== cfg.musicTextChannelId) {
     await interaction.reply({
       content: `Use Stoney Music in <#${cfg.musicTextChannelId}>.`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return false;
   }
 
   const member = interaction.member;
   if (!member) {
-    await interaction.reply({ content: "Could not read your roles.", ephemeral: true });
+    await interaction.reply({
+      content: "Could not read your roles.",
+      flags: MessageFlags.Ephemeral,
+    });
     return false;
   }
 
@@ -51,7 +56,7 @@ async function enforceGuards(interaction, cfg) {
 
     await interaction.reply({
       content: `Access locked. Missing: ${missing.join(", ")}.`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return false;
   }
