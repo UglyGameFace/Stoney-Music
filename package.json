@@ -1,0 +1,22 @@
+{
+  "name": "stoney-music-bot",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Single-server Discord music bot with Lavalink, resilient source resolution, queue controls, and Discloud deployment.",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node scripts/check-syntax.js && node scripts/audit-publish.js && bash -n start.sh",
+    "test": "node --test",
+    "validate": "npm run check && npm test"
+  },
+  "dependencies": {
+    "discord.js": "14.26.4",
+    "dotenv": "17.4.2",
+    "shoukaku": "4.3.0"
+  }
+}
