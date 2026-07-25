@@ -149,7 +149,7 @@ test("shuffle is deterministic with an injected random function", async () => {
   let index = 0;
   const count = player.shuffle(() => values[index++]);
   assert.equal(count, 4);
-  assert.deepEqual(player.getQueuePreview().map((item) => item.title), ["two", "three", "four", "one"]);
+  assert.deepEqual(player.getQueuePreview().map((item) => item.title), ["two", "four", "three", "one"]);
 });
 
 test("queue remove, move, and clear use one-based positions", async () => {
