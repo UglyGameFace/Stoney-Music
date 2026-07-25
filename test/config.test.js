@@ -10,6 +10,9 @@ const application = fs.readFileSync(path.join(root, "application.yml"), "utf8");
 const start = fs.readFileSync(path.join(root, "start.sh"), "utf8");
 const workflow = fs.readFileSync(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
 const discloud = fs.readFileSync(path.join(root, "discloud.config"), "utf8");
+const index = fs.readFileSync(path.join(root, "src", "index.js"), "utf8");
+const bootstrap = fs.readFileSync(path.join(root, "src", "bootstrap.js"), "utf8");
+const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
 test("Lavalink config uses current plugins and no retired YouTube clients", () => {
   assert.match(application, /youtube-plugin:1\.18\.1/);
@@ -30,10 +33,21 @@ test("unused credentialed mirror plugin and unsafe sources are absent", () => {
   assert.match(application, /password:\s*"\$\{LAVALINK_PASSWORD\}"/);
 });
 
-test("start script pins DAVE-capable Lavalink and supervises both processes", () => {
-  assert.match(start, /EXPECTED_LAVALINK_VERSION="\$\{LAVALINK_VERSION:-4\.2\.2\}"/);
-  assert.match(start, /wait -n "\$LAVALINK_PID" "\$BOT_PID"/);
-  assert.doesNotMatch(start, /exec node src\/index\.js/);
+test("Discloud MAIN and every supported start path use the JavaScript bootstrap", () => {
+  assert.match(discloud, /^MAIN=src\/bootstrap\.js$/m);
+  assert.match(discloud, /^START=node src\/bootstrap\.js$/m);
+  assert.doesNotMatch(discloud, /^MAIN=src\/index\.js$/m);
+  assert.equal(packageJson.main, "src/bootstrap.js");
+  assert.equal(packageJson.scripts.start, "node src/bootstrap.js");
+  assert.match(start, /exec node src\/bootstrap\.js/);
+  assert.match(bootstrap, /await waitForLavalink\([\s\S]*bot = spawnBot/);
+});
+
+test("Discord startup uses clientReady and one idempotent environment loader", () => {
+  assert.match(index, /Events\.ClientReady/);
+  assert.doesNotMatch(index, /client\.once\("ready"/);
+  assert.match(index, /loadEnvironment\(\)/);
+  assert.doesNotMatch(index, /tryLoadDotenv|\/home\/node\/\.env/);
 });
 
 test("CI and Discloud use the committed dependency lockfile", () => {
@@ -48,8 +62,6 @@ test("publishable tree does not contain a live environment file", () => {
 });
 
 test("runtime uses one canonical resolver and current dependency line", () => {
-  const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
-  const index = fs.readFileSync(path.join(root, "src", "index.js"), "utf8");
   const player = fs.readFileSync(path.join(root, "src", "player.js"), "utf8");
 
   assert.equal(packageJson.dependencies["discord.js"], "14.26.4");
