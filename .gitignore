@@ -31,6 +31,8 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Runtime server setup
+# Runtime server setup and playback memory
 data/guild-config.json
 data/guild-config.json.tmp
+data/playback-match-cache.json
+data/playback-match-cache.json.tmp
