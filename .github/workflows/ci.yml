@@ -18,23 +18,9 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --ignore-scripts
-      - name: Run complete validation
-        run: |
-          set +e
-          npm run validate > ci-validation-output.txt 2>&1
-          status=$?
-          cat ci-validation-output.txt
-          exit "$status"
-      - name: Preserve validation output
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: controller-validation-output
-          path: ci-validation-output.txt
-          if-no-files-found: ignore
-          retention-days: 1
+      - run: npm run validate
       - name: Verify runtime imports
-        run: node -e "require('./src/player'); require('./src/commands'); console.log('Runtime imports passed.')"
+        run: node -e "require('./src/player'); require('./src/commands'); require('./src/player-controller'); require('./src/autoplay'); console.log('Runtime imports passed.')"
       - name: Check for accidentally committed secrets/runtime files
         run: |
           test ! -f .env
