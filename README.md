@@ -1,18 +1,19 @@
 # Stoney Music
 
-A locked-down, single-server Discord music bot using Discord.js, Shoukaku, and Lavalink.
+A public, multi-server Discord music bot using Discord.js, Shoukaku, and Lavalink.
 
-## What was repaired
+## Public multi-server architecture
 
-- Correct Lavalink v4 parsing for direct tracks, searches, playlists, empty results, and load errors.
-- Current `youtube-source` clients and plugin version; retired client names were removed.
-- Lavalink 4.2.2 bootstrap for current Discord DAVE voice support.
-- One canonical search chain: YouTube → YouTube Music → SoundCloud.
-- Apple Music song and album links without Apple developer credentials by using public Apple/iTunes metadata, then finding a playable match.
-- Individual Spotify track and episode links without Spotify OAuth by using Spotify's official oEmbed metadata, then finding a playable match.
-- Queue event serialization so skips, loops, failures, and stale end events cannot double-advance or replay the wrong track.
-- A JavaScript bootstrap that Discloud runs as its actual `MAIN`; it starts Lavalink, waits for readiness, then starts and supervises the Discord bot.
-- Secret-safe repository/deployment files and automated regression tests.
+Stoney Music has no hard-coded server, channel, or role IDs.
+
+- One global slash-command set is registered for every server that installs the app.
+- Every server gets its own isolated setup record, keyed by that server's Discord guild ID.
+- An unconfigured server receives its own setup card with Discord's native channel picker.
+- When Stoney Music joins a new server while already online, setup starts for that new server automatically.
+- The selected music channel and optional access roles never carry over from another server.
+- Old `GUILD_ID` and `MUSIC_TEXT_CHANNEL_ID` hosting variables are not valid public configuration and should be deleted.
+
+During the first migration deployment only, an existing legacy `GUILD_ID` may be used to remove the old guild-only command set. It never determines where new commands or setup panels are registered.
 
 ## Supported input
 
@@ -33,35 +34,11 @@ Apple Music and Spotify links do not stream protected audio from those services.
 
 ## First-time server setup
 
-After installing the app to the server with both `bot` and `applications.commands`, restart the bot. On a one-server deployment, Stoney Music automatically registers guild commands even when `GUILD_ID` is omitted.
+Install the app with both `bot` and `applications.commands`.
 
-Use `/setup` as a server admin when Discord displays the slash commands. The music channel defaults to the channel where setup is run. Role restrictions are optional and are only enabled when roles are explicitly selected.
+Stoney Music registers these public commands globally:
 
-If Discord accepts the commands but a client does not display them, Stoney Music posts one recovery setup card in the configured guild. A server admin chooses the real music channel from Discord's native channel picker; **Use This Channel** remains available as a shortcut. The choice is saved at runtime, not hard-coded in source or environment variables.
-
-After selection, Stoney Music posts a ready card in the chosen channel with clickable references to the registered commands. The saved setup is reused after restarts, and the bot records the recovery panel so ordinary restarts do not generate additional cards.
-
-## Environment setup
-
-A physical `.env` file is optional. Local deployments may copy `.env.example` to `.env`; Discloud deployments may use Discloud's native environment-variable panel instead. Both paths populate `process.env`. Never commit `.env`.
-
-Required:
-
-- `DISCORD_TOKEN`
-- `LAVALINK_PASSWORD` — use a long random value
-
-Optional:
-
-- `GUILD_ID` — the bot auto-detects its server when connected to exactly one
-- `MUSIC_CONFIG_PATH` — override the saved runtime configuration path
-
-No server role names are assumed. Access roles are optional and setup-managed.
-
-## Slash commands
-
-The bot registers `/setup` plus the music commands:
-
-- `/setup` — admin-only first-time configuration; runtime still verifies **Manage Server**
+- `/setup`
 - `/play`
 - `/skip`
 - `/stop`
@@ -71,27 +48,72 @@ The bot registers `/setup` plus the music commands:
 - `/loop`
 - `/filter`
 
-For the fastest and clearest registration, set `GUILD_ID` to the exact server where the bot is installed. A healthy startup logs the target server and the full accepted command list:
+A server owner or member with **Manage Server** can run `/setup`. If Discord's command picker does not display the commands yet, Stoney Music posts a recovery setup card in that server. The admin chooses the desired commands channel using Discord's native channel picker.
+
+The setup card:
+
+- belongs only to the server where it was posted;
+- allows one text or announcement channel to be selected;
+- enables no role gate by default;
+- saves the selection across restarts;
+- replaces obsolete panel versions once;
+- rejects stale duplicate cards;
+- posts a ready card in the selected channel.
+
+## Environment setup
+
+A physical `.env` file is optional. Local deployments may copy `.env.example` to `.env`; Discloud deployments may use Discloud's native environment-variable panel. Both paths populate `process.env`.
+
+Required:
+
+- `DISCORD_TOKEN`
+- `LAVALINK_PASSWORD` — use a long random value
+
+Optional runtime tuning:
+
+- `MUSIC_CONFIG_PATH` — override the per-server configuration file path
+- `LAVALINK_VERSION`
+- `JAVA_OPTS`
+- `LAVALINK_WAIT_TIMEOUT`
+
+Do not configure:
+
+- `GUILD_ID`
+- `MUSIC_TEXT_CHANNEL_ID`
+- server-specific role IDs or names
+
+Delete those legacy values from Discloud after the migration deployment.
+
+## Expected public startup logs
 
 ```text
-🧭 Registering 9 guild commands for Server Name (SERVER_ID)...
-✅ Discord accepted 9 guild commands for Server Name (SERVER_ID): /filter, /loop, /nowplaying, /play, /queue, /setup, /skip, /stop, /volume
+🌐 Registering 9 public global commands for every server using Stoney Music...
+✅ Discord accepted 9 public global commands: /filter, /loop, /nowplaying, /play, /queue, /setup, /skip, /stop, /volume
 ```
 
-When setup has not been saved, a healthy recovery startup also logs:
+An unconfigured server also receives a line like:
 
 ```text
-🧰 Posted one Stoney Music setup panel for Server Name in #channel-name (CHANNEL_ID); message=MESSAGE_ID.
+🧰 Posted Stoney Music setup for Server Name (SERVER_ID) in #channel-name (CHANNEL_ID); message=MESSAGE_ID.
 ```
 
-On a one-server deployment, a missing or stale `GUILD_ID` is recovered automatically from the connected server. Multi-server deployments still require an exact `GUILD_ID` for immediate guild commands.
+When the bot joins a new server while online:
 
-Local Lavalink defaults:
+```text
+🆕 Stoney Music joined Server Name (SERVER_ID); starting per-server setup.
+```
 
-- `LAVALINK_HOST=127.0.0.1`
-- `LAVALINK_PORT=2333`
-- `LAVALINK_SECURE=false`
-- `LAVALINK_VERSION=4.2.2`
+## Playback repairs
+
+- Correct Lavalink v4 parsing for direct tracks, searches, playlists, empty results, and load errors.
+- Current `youtube-source` clients and plugin version.
+- Lavalink 4.2.2 bootstrap for current Discord voice support.
+- One canonical search chain: YouTube → YouTube Music → SoundCloud.
+- Public Apple/iTunes metadata resolution for Apple Music songs and albums.
+- Spotify oEmbed resolution for individual tracks, episodes, and `spotify.link` links.
+- Serialized queue transitions so skip, loop, failure, and stale events cannot double-advance.
+- Java/Node supervision and cleanup through `src/bootstrap.js`.
+- Secret-safe repository and deterministic dependency installation.
 
 ## Runtime requirements
 
@@ -113,42 +135,20 @@ node scripts/doctor.js
 
 ## Run locally
 
-`src/bootstrap.js` is the canonical launcher used by Discloud, npm, and `start.sh`. It downloads the official pinned Lavalink JAR if needed, starts Java, waits until port 2333 is accepting connections, and only then starts the Discord bot. If either process stops, it cleans up the other so Discloud can restart the whole service safely.
-
 ```bash
 cp .env.example .env
-# Fill in real values.
+# Fill in the token and Lavalink password.
 bash start.sh
 ```
 
-The first startup also downloads the pinned YouTube source plugin from the official Lavalink Maven repository.
+`src/bootstrap.js` downloads the pinned Lavalink JAR if needed, starts Java, waits for port 2333, and only then starts the Discord bot. If either process stops, it cleans up the other.
 
 ## Deploy to Discloud
 
-The included `discloud.config`:
+Use Discloud's GitHub integration for normal deployments. The included `discloud.config` installs the locked Node dependencies, Java, FFmpeg, and starts `src/bootstrap.js`.
 
-- installs `tools`, `ffmpeg`, and Java;
-- installs the locked Node dependencies with `npm ci`;
-- sets `MAIN=src/bootstrap.js`, so startup remains correct even if Discloud ignores a custom `START` command;
-- allocates 2 GB RAM.
-
-Use Discloud's GitHub integration for normal deployments. Configure secrets and settings in the Discloud environment panel; do not commit `.env`, `node_modules`, logs, plugin downloads, or a stale Lavalink JAR.
-
-### Expected startup order
-
-A healthy Discloud boot should show this order before Discord login:
-
-1. optional environment-file message when an actual `.env` exists;
-2. Java version detection;
-3. Lavalink download or installed-version confirmation;
-4. `Starting Lavalink`;
-5. `Lavalink is accepting connections`;
-6. `Starting Stoney Music bot`;
-7. Discord login and slash-command registration;
-8. one recovery setup-panel post when setup has not yet been saved.
-
-Seeing `(node:1)` immediately followed by `ECONNREFUSED 127.0.0.1:2333` means an old deployment is still launching `src/index.js` directly instead of the bootstrap. Redeploy the current project root so Discloud reads the updated `discloud.config`.
+Keep secrets in Discloud's native environment-variable panel. Do not commit `.env`, `node_modules`, logs, plugin downloads, or a Lavalink JAR.
 
 ## YouTube caveats
 
-YouTube actively changes access controls. Current clients solve stale-client failures but do not guarantee that every hosting IP will work forever. OAuth and `poToken` are intentionally disabled by default because maintainers warn they are not universal fixes and OAuth can put the attached Google account at risk. See `docs/YOUTUBE_TROUBLESHOOTING.md` before changing those settings.
+YouTube actively changes access controls. Current clients solve stale-client failures but do not guarantee that every hosting IP will work forever. OAuth and `poToken` are intentionally disabled by default because they are not universal fixes and can introduce account risk. See `docs/YOUTUBE_TROUBLESHOOTING.md` before changing those settings.
