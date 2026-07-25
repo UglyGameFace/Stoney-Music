@@ -120,8 +120,11 @@ async function resolvePlaybackFallback(
   } = {}
 ) {
   if (typeof resolve !== "function") throw new TypeError("resolve must be a function");
-  if (!isYoutubeTrack(originalTrack) || originalTrack?.fallbackAttempted) return null;
+  if (!isYoutubeTrack(originalTrack)) return null;
 
+  // The GuildPlayer owns the once-per-track attempt flag. It marks the current
+  // item before calling this resolver so duplicate exception events cannot start
+  // parallel searches. The resolver must still process that pre-marked item.
   const query = buildPlaybackFallbackQuery(originalTrack);
   if (!query) return null;
 
