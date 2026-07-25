@@ -23,6 +23,8 @@ function normalizeGuildConfig(value = {}, defaults = {}) {
     roleVerified: configuredValue(value, defaults, "roleVerified"),
     roleResidentId: configuredValue(value, defaults, "roleResidentId"),
     roleResident: configuredValue(value, defaults, "roleResident"),
+    setupPanelChannelId: configuredValue(value, defaults, "setupPanelChannelId"),
+    setupPanelMessageId: configuredValue(value, defaults, "setupPanelMessageId"),
   };
 }
 
