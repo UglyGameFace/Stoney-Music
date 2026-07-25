@@ -14,12 +14,14 @@ const {
 
 const SETUP_BUTTON_ID = "stoney_music:setup_here";
 const SETUP_CHANNEL_SELECT_ID = "stoney_music:setup_channel";
-const SETUP_PANEL_VERSION = "3";
+const SETUP_PANEL_VERSION = "4";
 const COMMAND_ORDER = [
   "setup",
   "play",
   "queue",
   "nowplaying",
+  "autoplay",
+  "player",
   "skip",
   "stop",
   "volume",
@@ -104,6 +106,12 @@ function buildSetupPanel(commandIds = {}) {
           "No role restriction is enabled unless an admin explicitly chooses roles later.",
       },
       {
+        name: "Player features",
+        value:
+          "Persistent controls, live progress, pause/resume, seek, previous, replay, shuffle, " +
+          "queue management, advanced filters, and related-music autoplay.",
+      },
+      {
         name: "Registered commands",
         value: formatCommandMentions(commandIds),
       },
@@ -140,6 +148,12 @@ function buildSetupCompleteEmbed(saved, commandIds = {}) {
     .setDescription(`Music commands for this server are restricted to <#${saved.musicTextChannelId}>.`)
     .addFields(
       { name: "Access gate", value: "No role gate is enabled." },
+      {
+        name: "Player",
+        value:
+          "Use `/play` to start music. The persistent controller includes transport, queue, " +
+          "volume, loop, autoplay, and filter controls.",
+      },
       { name: "Commands", value: formatCommandMentions(commandIds) }
     )
     .setFooter({ text: "This channel was selected in Discord and saved only for this server." });
