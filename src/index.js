@@ -12,10 +12,10 @@ const {
   MessageFlags,
   Partials,
   REST,
-  Routes,
 } = require("discord.js");
 
 const { buildCommands } = require("./commands");
+const { syncApplicationCommands } = require("./command-sync");
 const { enforceGuards } = require("./guards");
 const { PlayerManager } = require("./player");
 const { MusicResolutionError, toQueueTrack } = require("./resolver");
@@ -111,15 +111,22 @@ client.once(Events.ClientReady, async () => {
   const applicationId = client.application.id;
 
   try {
-    if (cfg.guildId) {
-      await rest.put(Routes.applicationGuildCommands(applicationId, cfg.guildId), { body: commands });
-      console.log("✅ Slash commands registered for the configured server.");
-    } else {
-      await rest.put(Routes.applicationCommands(applicationId), { body: commands });
-      console.log("✅ Global slash commands registered; Discord propagation may take time.");
-    }
+    await syncApplicationCommands({
+      rest,
+      applicationId,
+      guildId: cfg.guildId,
+      guilds: client.guilds,
+      commands,
+      logger: console,
+    });
   } catch (error) {
-    console.error("❌ Slash command registration failed:", error);
+    console.error("❌ Slash command registration failed:", {
+      code: error?.code,
+      status: error?.status,
+      message: error?.message || String(error),
+      guildId: cfg.guildId,
+      applicationId,
+    });
   }
 });
 
