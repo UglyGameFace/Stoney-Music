@@ -1,0 +1,13 @@
+.git/
+.github/
+test/
+docs/
+ACTIVE_TASK.md
+node_modules/
+.env
+.env.*
+!.env.example
+logs/
+plugins/
+lavalink.log
+*.zip
