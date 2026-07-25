@@ -2,8 +2,14 @@
 
 const { Shoukaku } = require("shoukaku");
 const { resolveAutoplayRecommendation } = require("./autoplay");
-const { GuildPlayer } = require("./guild-player");
-const { resolvePlaybackFallback } = require("./playback-fallback");
+const { refineInitialResolution } = require("./initial-track-selector");
+const { PlaybackMatchCache } = require("./playback-cache");
+const {
+  fallbackIdentityKey,
+  playbackCandidateKey,
+  resolvePlaybackFallback,
+} = require("./playback-fallback");
+const { ResilientGuildPlayer } = require("./resilient-guild-player");
 const { resolveMusicQuery } = require("./resolver");
 const { StableDiscordJSConnector } = require("./voice-connector");
 
@@ -11,6 +17,8 @@ class PlayerManager {
   constructor({ nodes, discordClient, logger = console }) {
     const connector = new StableDiscordJSConnector(discordClient, { logger });
     this.logger = logger;
+    this.playbackCache = new PlaybackMatchCache({ logger });
+    this.playbackCacheReady = this.playbackCache.load();
 
     this.shoukaku = new Shoukaku(connector, nodes, {
       reconnectTries: 5,
@@ -41,10 +49,12 @@ class PlayerManager {
     if (!this.guildPlayers.has(key)) {
       this.guildPlayers.set(
         key,
-        new GuildPlayer(this.shoukaku, key, {
+        new ResilientGuildPlayer(this.shoukaku, key, {
           logger: this.logger,
-          resolveFallback: (track) => this.resolveFallback(track),
+          resolveFallback: (track, options) => this.resolveFallback(track, options),
           resolveAutoplay: (seed, context) => this.resolveAutoplay(seed, context),
+          onFallbackVerified: (track) => this.rememberVerifiedFallback(track),
+          onFallbackFailed: (track, reason) => this.rememberFailedFallback(track, reason),
         })
       );
     }
@@ -66,10 +76,29 @@ class PlayerManager {
   }
 
   async resolveFallback(track, options = {}) {
+    await this.playbackCacheReady;
+    const identityKey = fallbackIdentityKey(track);
+    const cached = this.playbackCache.get(identityKey, { requesterId: track.requesterId });
     return resolvePlaybackFallback(track, {
       ...options,
+      cachedCandidates: cached ? [cached] : [],
+      deadKeys: this.playbackCache.deadKeys(),
       resolve: (identifier) => this.resolve(identifier),
     });
+  }
+
+  async rememberVerifiedFallback(track) {
+    await this.playbackCacheReady;
+    const identityKey = fallbackIdentityKey(track);
+    const candidateKey = playbackCandidateKey(track);
+    await this.playbackCache.rememberGood(identityKey, candidateKey, track);
+  }
+
+  async rememberFailedFallback(track, reason) {
+    await this.playbackCacheReady;
+    const identityKey = fallbackIdentityKey(track);
+    const candidateKey = playbackCandidateKey(track);
+    await this.playbackCache.rememberDead(identityKey, candidateKey, reason);
   }
 
   async resolveAutoplay(seed, options = {}) {
@@ -81,11 +110,14 @@ class PlayerManager {
   }
 
   async resolveQuery(query, options = {}) {
-    return resolveMusicQuery(query, {
+    const resolution = await resolveMusicQuery(query, {
       ...options,
+      resolve: (identifier) => this.resolve(identifier),
+    });
+    return refineInitialResolution(resolution, query, {
       resolve: (identifier) => this.resolve(identifier),
     });
   }
 }
 
-module.exports = { GuildPlayer, PlayerManager };
+module.exports = { GuildPlayer: ResilientGuildPlayer, PlayerManager, ResilientGuildPlayer };

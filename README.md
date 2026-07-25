@@ -21,14 +21,32 @@ Stoney Music has no hard-coded server, channel, or role IDs.
 | Direct YouTube video | Yes |
 | YouTube playlist | Yes, capped at 100 tracks per command |
 | SoundCloud link/search fallback | Yes |
-| Apple Music song | Yes, metadata mirror |
+| Bandcamp search fallback | Yes |
+| Apple Music song | Yes, catalog-identity mirror |
 | Apple Music album | Yes, up to 50 songs; unavailable matches are reported |
 | Apple Music playlist | Requires Apple Music API credentials; rejected clearly for now |
-| Spotify track or episode | Yes, metadata mirror; full and `spotify.link` mobile links |
+| Spotify track or episode | Yes, catalog-identity mirror; full and `spotify.link` mobile links |
 | Spotify album or playlist | Requires Spotify API credentials; rejected clearly for now |
 | Arbitrary HTTP audio/local files | Disabled intentionally |
 
-Apple Music and Spotify links do not stream protected audio from those services. They supply metadata used to find a playable equivalent through the configured Lavalink providers. When a YouTube mirror is blocked during playback, Stoney Music can replace it in place with a validated alternate-provider match.
+Apple Music and Spotify links do not expose reusable full-song audio streams to Lavalink. Stoney preserves their title, artist, album, artwork, duration, source link, and catalog identity while selecting a playable mirror from configured providers. The player continues to display the requested Apple or Spotify identity even when the audio is supplied by another provider.
+
+## Strict universal playback mirroring
+
+Apple links, Spotify links, direct YouTube links, manual searches, and other supported direct links use the same playback-recovery engine.
+
+- The original request becomes a canonical playback identity.
+- Candidate title and artist must strongly match that identity.
+- Trusted Apple durations use a tight duration tolerance; less-authoritative sources use a slightly wider tolerance.
+- Unexpected remixes, mixes, mashups, covers, karaoke, instrumentals, acoustic versions, live recordings, sped-up/slowed edits, reverb edits, nightcore, bootlegs, tributes, piano versions, radio edits, and extended versions are rejected by default.
+- A requested alternate version is allowed only when that marker was part of the original title.
+- Stoney retains several ranked candidates across providers instead of discarding everything except the first search result.
+- If a candidate later returns a 404 or another stream failure, the next strict candidate is tried without advancing the human queue.
+- Recovery is confirmed only after Lavalink emits a real track-start event. A search result alone is not treated as successful playback.
+- Proven mirrors are cached for faster future requests. Dead stream identities are temporarily blacklisted so restarts do not immediately choose the same broken upload again.
+- When no strict candidate remains, Stoney fails honestly rather than silently playing the wrong cover or remix.
+
+The initial search chain remains YouTube → YouTube Music → SoundCloud. Runtime recovery evaluates alternate providers while skipping the provider that just failed.
 
 ## Persistent player controller
 
@@ -110,6 +128,7 @@ Required:
 Optional runtime tuning:
 
 - `MUSIC_CONFIG_PATH` — override the per-server configuration file path
+- `PLAYBACK_CACHE_PATH` — override the proven/dead mirror cache path
 - `LAVALINK_VERSION`
 - `JAVA_OPTS`
 - `LAVALINK_WAIT_TIMEOUT`
@@ -149,7 +168,9 @@ When the bot joins a new server while online:
 - One canonical initial search chain: YouTube → YouTube Music → SoundCloud.
 - Public Apple/iTunes metadata resolution for Apple Music songs and albums.
 - Spotify oEmbed resolution for individual tracks, episodes, and `spotify.link` links.
-- Runtime alternate-provider recovery when YouTube returns metadata but blocks the audio stream.
+- Universal strict alternate-provider recovery for Apple, Spotify, YouTube, manual searches, and other supported links.
+- Sequential candidate retries when a search result exists but its real stream later fails.
+- Persistent proven-mirror and dead-stream memory.
 - Serialized queue transitions so skip, previous, replay, loop, autoplay, provider failure, and stale events cannot double-advance.
 - Java/Node supervision and cleanup through `src/bootstrap.js`.
 - Secret-safe repository and deterministic dependency installation.
@@ -190,4 +211,4 @@ Keep secrets in Discloud's native environment-variable panel. Do not commit `.en
 
 ## YouTube caveats
 
-YouTube actively changes access controls. Current clients solve stale-client failures but do not guarantee that every hosting IP will work forever. OAuth and `poToken` are intentionally disabled by default because they are not universal fixes and can introduce account risk. Stoney's validated alternate-provider fallback and autoplay resolver reduce the effect of host-IP blocks, but no third-party source can guarantee every song is always available. See `docs/YOUTUBE_TROUBLESHOOTING.md` before changing authentication settings.
+YouTube actively changes access controls. Current clients solve stale-client failures but do not guarantee that every hosting IP will work forever. OAuth and `poToken` are intentionally disabled by default because they are not universal fixes and can introduce account risk. Stoney's strict multi-provider recovery and autoplay resolver reduce the effect of host-IP blocks, but no third-party source can guarantee every song is always available. See `docs/YOUTUBE_TROUBLESHOOTING.md` before changing authentication settings.

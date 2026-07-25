@@ -20,7 +20,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run validate
       - name: Verify runtime imports
-        run: node -e "require('./src/player'); require('./src/commands'); require('./src/player-controller'); require('./src/autoplay'); console.log('Runtime imports passed.')"
+        run: node -e "require('./src/player'); require('./src/commands'); require('./src/player-controller'); require('./src/autoplay'); require('./src/playback-cache'); require('./src/resilient-guild-player'); require('./src/initial-track-selector'); console.log('Runtime imports passed.')"
       - name: Check for accidentally committed secrets/runtime files
         run: |
           test ! -f .env

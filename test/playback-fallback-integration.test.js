@@ -4,8 +4,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 
-const { GuildPlayer } = require("../src/guild-player");
 const { resolvePlaybackFallback } = require("../src/playback-fallback");
+const { ResilientGuildPlayer } = require("../src/resilient-guild-player");
 
 class FakePlayer extends EventEmitter {
   constructor() {
@@ -37,13 +37,30 @@ class FakeShoukaku {
 
 function youtubeMirror() {
   return {
-    title: "Moneybagg Yo - I See Why",
+    title: "I See Why",
     author: "Moneybagg Yo",
     uri: "https://youtube.com/watch?v=blocked",
     durationMs: 182_000,
     sourceName: "youtube",
+    identifier: "blocked",
     requesterId: "user-1",
     encoded: "youtube-blocked",
+    playbackCandidateTitle: "Moneybagg Yo - I See Why",
+    playbackCandidateAuthor: "Moneybagg Yo",
+    playbackIdentity: {
+      title: "I See Why",
+      artist: "Moneybagg Yo",
+      album: "Hard to Love",
+      artworkUrl: "https://apple.test/art.jpg",
+      durationMs: 182_000,
+      durationTrusted: true,
+      sourceType: "apple-music",
+      sourceId: "apple-track-1",
+      sourceUrl: "https://music.apple.com/us/song/i-see-why/1",
+      requestedQuery: "Moneybagg Yo - I See Why",
+    },
+    fallbackTriedKeys: [],
+    fallbackAttemptCount: 0,
   };
 }
 
@@ -63,16 +80,20 @@ function soundCloudCandidate() {
   };
 }
 
-test("Apple metadata mirrored through blocked YouTube recovers through real SoundCloud resolver", async () => {
+test("Apple metadata mirrored through blocked YouTube builds a real multi-provider recovery plan", async () => {
   const fake = new FakePlayer();
   const searches = [];
-  const player = new GuildPlayer(new FakeShoukaku(fake), "guild", {
+  const player = new ResilientGuildPlayer(new FakeShoukaku(fake), "guild", {
     logger: { log() {}, warn() {}, error() {} },
-    resolveFallback: (track) =>
+    resolveFallback: (track, options) =>
       resolvePlaybackFallback(track, {
+        ...options,
         resolve: async (identifier) => {
           searches.push(identifier);
-          return { loadType: "search", data: [soundCloudCandidate()] };
+          if (identifier.startsWith("scsearch:")) {
+            return { loadType: "search", data: [soundCloudCandidate()] };
+          }
+          return { loadType: "empty", data: {} };
         },
       }),
   });
@@ -87,9 +108,16 @@ test("Apple metadata mirrored through blocked YouTube recovers through real Soun
     exception: { message: "All clients failed: sign in to confirm you're not a bot" },
   });
 
-  assert.deepEqual(searches, ["scsearch:Moneybagg Yo - I See Why"]);
+  assert.deepEqual(searches, [
+    "scsearch:Moneybagg Yo - I See Why",
+    "bcsearch:Moneybagg Yo - I See Why",
+  ]);
   assert.deepEqual(fake.played, ["youtube-blocked", "soundcloud-working"]);
   assert.equal(player.nowPlaying().sourceName, "soundcloud");
   assert.equal(player.nowPlaying().fallbackFrom, "youtube");
   assert.equal(player.nowPlaying().requesterId, "user-1");
+  assert.equal(player.nowPlaying().title, "I See Why");
+  assert.equal(player.nowPlaying().author, "Moneybagg Yo");
+  assert.equal(player.nowPlaying().artworkUrl, "https://apple.test/art.jpg");
+  assert.equal(player.nowPlaying().playbackIdentity.sourceType, "apple-music");
 });
