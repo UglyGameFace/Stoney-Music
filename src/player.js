@@ -11,9 +11,11 @@ const {
 } = require("./playback-fallback");
 const {
   DEFAULT_PLAYBACK_START_TIMEOUT_MS,
-  PLAYBACK_ENGINE_BUILD,
-  ResilientGuildPlayer,
 } = require("./resilient-guild-player");
+const {
+  PLAYBACK_ENGINE_BUILD,
+  PlaybackGuildPlayer,
+} = require("./playback-guild-player");
 const { resolveMusicQuery } = require("./resolver");
 const { StableDiscordJSConnector } = require("./voice-connector");
 
@@ -30,7 +32,7 @@ class PlayerManager {
 
     this.logger.log?.(
       `🧬 Playback engine loaded: ${PLAYBACK_ENGINE_BUILD} ` +
-        `(start watchdog ${this.playbackStartTimeoutMs}ms, sequential provider retries enabled)`
+        `(start watchdog ${this.playbackStartTimeoutMs}ms, loadFailed routing and sequential provider retries enabled)`
     );
 
     this.shoukaku = new Shoukaku(connector, nodes, {
@@ -62,7 +64,7 @@ class PlayerManager {
     if (!this.guildPlayers.has(key)) {
       this.guildPlayers.set(
         key,
-        new ResilientGuildPlayer(this.shoukaku, key, {
+        new PlaybackGuildPlayer(this.shoukaku, key, {
           logger: this.logger,
           resolveFallback: (track, options) => this.resolveFallback(track, options),
           resolveAutoplay: (seed, context) => this.resolveAutoplay(seed, context),
@@ -134,4 +136,9 @@ class PlayerManager {
   }
 }
 
-module.exports = { GuildPlayer: ResilientGuildPlayer, PlayerManager, ResilientGuildPlayer };
+module.exports = {
+  GuildPlayer: PlaybackGuildPlayer,
+  PlayerManager,
+  PlaybackGuildPlayer,
+  ResilientGuildPlayer: PlaybackGuildPlayer,
+};
