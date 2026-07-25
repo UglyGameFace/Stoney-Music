@@ -1,10 +1,11 @@
 "use strict";
 
 class GuildPlayer {
-  constructor(shoukaku, guildId, { logger = console } = {}) {
+  constructor(shoukaku, guildId, { logger = console, resolveFallback = null } = {}) {
     this.shoukaku = shoukaku;
     this.guildId = guildId;
     this.logger = logger;
+    this.resolveFallback = typeof resolveFallback === "function" ? resolveFallback : null;
 
     this.player = null;
     this.voiceChannelId = null;
@@ -25,6 +26,27 @@ class GuildPlayer {
     const run = this._transition.then(operation, operation);
     this._transition = run.catch(() => {});
     return run;
+  }
+
+  _shortErrorMessage(event) {
+    const raw = event?.exception?.message || event?.message || "Unknown playback exception";
+    return String(raw).split(/\r?\n/, 1)[0].slice(0, 500);
+  }
+
+  _scheduleExceptionStop(failedEncoded) {
+    // Lavalink normally follows an exception with a loadFailed end event. This
+    // watchdog is only for providers that emit the exception but never terminate
+    // the track, and it cannot stop a replacement or a newly advanced queue item.
+    const recovery = setTimeout(() => {
+      if (!failedEncoded || this.current?.encoded !== failedEncoded || !this.player) return;
+      this.player.stopTrack().catch((error) => {
+        this.logger.error?.("Failed to stop an unrecoverable track exception", {
+          guildId: this.guildId,
+          message: error?.message || String(error),
+        });
+      });
+    }, 1_000);
+    recovery.unref?.();
   }
 
   async connect({ guildId, voiceChannelId, shardId, deaf = true, mute = false }) {
@@ -63,27 +85,12 @@ class GuildPlayer {
     });
 
     this.player.on("exception", (event) => {
-      this.logger.error?.("Lavalink track exception", {
-        guildId: this.guildId,
-        message: event?.exception?.message || event?.message || "Unknown exception",
-        severity: event?.exception?.severity,
-        cause: event?.exception?.cause,
-      });
-
-      // The matching loadFailed end event normally owns the transition. A short
-      // watchdog stops only the same still-current track if that terminal event
-      // never arrives, avoiding both a frozen queue and a double advance.
-      const failedEncoded = event?.track?.encoded || this.current?.encoded;
-      const recovery = setTimeout(() => {
-        if (!failedEncoded || this.current?.encoded !== failedEncoded || !this.player) return;
-        this.player.stopTrack().catch((error) => {
-          this.logger.error?.("Failed to recover from track exception", {
-            guildId: this.guildId,
-            message: error?.message || String(error),
-          });
+      this._handleTrackException(event).catch((error) => {
+        this.logger.error?.("Track-exception recovery failed", {
+          guildId: this.guildId,
+          message: error?.message || String(error),
         });
-      }, 1_000);
-      recovery.unref?.();
+      });
     });
 
     this.player.on("stuck", (event) => {
@@ -205,6 +212,83 @@ class GuildPlayer {
 
     await this.player.setFilters(filters);
     return preset;
+  }
+
+  async _handleTrackException(event = {}) {
+    return this._serialize(async () => {
+      if (!this.player || !this.current) return null;
+
+      const failedEncoded = event?.track?.encoded || this.current.encoded;
+      if (failedEncoded && failedEncoded !== this.current.encoded) {
+        this.logger.warn?.("Ignoring stale Lavalink exception event", {
+          guildId: this.guildId,
+        });
+        return this.current;
+      }
+
+      const failed = this.current;
+      const failureMessage = this._shortErrorMessage(event);
+      this.logger.warn?.("⚠️ Playback source failed", {
+        guildId: this.guildId,
+        title: failed.title,
+        source: failed.sourceName,
+        message: failureMessage,
+      });
+
+      if (this.resolveFallback && !failed.fallbackAttempted) {
+        // Mark first so duplicate exception events cannot launch parallel searches.
+        failed.fallbackAttempted = true;
+        try {
+          const fallback = await this.resolveFallback(failed);
+
+          // A moderator may have stopped/skipped playback while the provider search
+          // was running. Never resurrect a track whose state has already changed.
+          if (!this.player || this.current !== failed) return this.current;
+
+          if (fallback?.track) {
+            const replacement = fallback.track;
+            replacement.fallbackAttempted = true;
+            try {
+              const started = await this._startTrack(replacement);
+              this.logger.log?.("🔁 Recovered blocked playback through another provider", {
+                guildId: this.guildId,
+                originalTitle: failed.title,
+                replacementTitle: replacement.title,
+                source: fallback.source || replacement.sourceName,
+                score: Number(fallback.score || 0).toFixed(3),
+              });
+              return started;
+            } catch (error) {
+              // _startTrack clears current when the replacement itself cannot start.
+              // Restore the failed identity so the watchdog/end event can advance once.
+              if (!this.current) this.current = failed;
+              this.logger.warn?.("Playback fallback candidate could not start", {
+                guildId: this.guildId,
+                source: fallback.source || replacement.sourceName,
+                message: error?.message || String(error),
+              });
+            }
+          } else {
+            this.logger.warn?.("No safe playback fallback match was found", {
+              guildId: this.guildId,
+              title: failed.title,
+              bestScore: Number(fallback?.score || 0).toFixed(3),
+              attempts: fallback?.attempts,
+            });
+          }
+        } catch (error) {
+          if (!this.player || this.current !== failed) return this.current;
+          this.logger.warn?.("Playback fallback search failed", {
+            guildId: this.guildId,
+            title: failed.title,
+            message: error?.message || String(error),
+          });
+        }
+      }
+
+      this._scheduleExceptionStop(failedEncoded);
+      return this.current;
+    });
   }
 
   async _handleTrackEnd(event = {}) {
