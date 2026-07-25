@@ -59,6 +59,11 @@ class GuildConfigStore {
     return normalizeGuildConfig(saved || {}, this.defaults);
   }
 
+  hasSavedSetup(guildId) {
+    if (!guildId) return false;
+    return Boolean(this.guilds[String(guildId)]?.musicTextChannelId);
+  }
+
   async set(guildId, patch) {
     if (!guildId) throw new TypeError("A guild ID is required to save music configuration.");
     if (!this.loaded) await this.load();

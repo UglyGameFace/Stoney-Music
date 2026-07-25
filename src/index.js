@@ -22,6 +22,7 @@ const { enforceGuards } = require("./guards");
 const { PlayerManager } = require("./player");
 const { MusicResolutionError, toQueueTrack } = require("./resolver");
 const { safeTrackDescription } = require("./format");
+const { handleSetupPanelInteraction, postSetupPanels } = require("./setup-panel");
 
 function missingKeys(keys) {
   return keys.filter((key) => !process.env[key] || String(process.env[key]).trim() === "");
@@ -57,6 +58,16 @@ async function sendInteractionError(interaction, error) {
   }
 }
 
+async function sendSetupPanelError(interaction) {
+  if (!interaction.isRepliable()) return;
+  const payload = {
+    content: "❌ Setup failed unexpectedly. The detailed cause was written to the bot logs.",
+    flags: MessageFlags.Ephemeral,
+  };
+  if (interaction.deferred || interaction.replied) await interaction.followUp(payload);
+  else await interaction.reply(payload);
+}
+
 const cfg = {
   token: process.env.DISCORD_TOKEN,
   guildId: process.env.GUILD_ID || null,
@@ -65,8 +76,10 @@ const cfg = {
 const configStore = new GuildConfigStore({
   defaults: {
     musicTextChannelId: process.env.MUSIC_TEXT_CHANNEL_ID || null,
-    roleVerified: process.env.ROLE_VERIFIED || "Verified",
-    roleResident: process.env.ROLE_RESIDENT || "Resident",
+    roleVerifiedId: null,
+    roleVerified: null,
+    roleResidentId: null,
+    roleResident: null,
   },
 });
 
@@ -136,13 +149,13 @@ client.once(Events.ClientReady, async () => {
       applicationId,
     });
   }
-});
 
-function findRoleByName(guild, name) {
-  if (!name) return null;
-  const target = String(name).toLowerCase();
-  return guild.roles.cache.find((role) => role.name.toLowerCase() === target) || null;
-}
+  try {
+    await postSetupPanels({ client, configStore, logger: console });
+  } catch (error) {
+    console.error("❌ Recovery setup panel failed:", error?.stack || error);
+  }
+});
 
 async function handleSetup(interaction) {
   if (!interaction.inGuild()) {
@@ -170,11 +183,11 @@ async function handleSetup(interaction) {
   const verifiedRole =
     interaction.options.getRole("verified_role") ||
     interaction.guild.roles.cache.get(existing.roleVerifiedId) ||
-    findRoleByName(interaction.guild, existing.roleVerified);
+    null;
   const residentRole =
     interaction.options.getRole("resident_role") ||
     interaction.guild.roles.cache.get(existing.roleResidentId) ||
-    findRoleByName(interaction.guild, existing.roleResident);
+    null;
 
   const saved = await configStore.set(interaction.guildId, {
     musicTextChannelId: musicChannel.id,
@@ -206,7 +219,15 @@ async function handleSetup(interaction) {
   );
 }
 
-client.on("interactionCreate", async (interaction) => {
+client.on(Events.InteractionCreate, async (interaction) => {
+  try {
+    if (await handleSetupPanelInteraction(interaction, { configStore, logger: console })) return;
+  } catch (error) {
+    console.error("Stoney Music recovery setup failed:", error?.stack || error);
+    await sendSetupPanelError(interaction);
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   if (interaction.commandName === "setup") {

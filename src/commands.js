@@ -1,13 +1,12 @@
 "use strict";
 
-const { ChannelType, PermissionFlagsBits, SlashCommandBuilder } = require("discord.js");
+const { ChannelType, SlashCommandBuilder } = require("discord.js");
 
 function buildCommands() {
   return [
     new SlashCommandBuilder()
       .setName("setup")
       .setDescription("Configure Stoney Music for this server")
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
       .addChannelOption((option) =>
         option
           .setName("music_channel")

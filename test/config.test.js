@@ -61,15 +61,21 @@ test("publishable tree does not contain a live environment file", () => {
   assert.equal(fs.existsSync(path.join(root, ".env")), false);
 });
 
-test("setup can initialize the bot without a preconfigured music channel", () => {
+test("setup can initialize the bot without a preconfigured music channel or role assumptions", () => {
   const commands = fs.readFileSync(path.join(root, "src", "commands.js"), "utf8");
   const guards = fs.readFileSync(path.join(root, "src", "guards.js"), "utf8");
+  const setupPanel = fs.readFileSync(path.join(root, "src", "setup-panel.js"), "utf8");
   assert.match(commands, /setName\("setup"\)/);
-  assert.match(commands, /PermissionFlagsBits\.ManageGuild/);
+  assert.doesNotMatch(commands, /setDefaultMemberPermissions/);
   assert.match(index, /interaction\.commandName === "setup"/);
+  assert.match(index, /PermissionFlagsBits\.ManageGuild/);
+  assert.match(index, /postSetupPanels/);
+  assert.match(index, /handleSetupPanelInteraction/);
   assert.match(index, /missingKeys\(\["DISCORD_TOKEN"\]\)/);
+  assert.doesNotMatch(index, /ROLE_VERIFIED|ROLE_RESIDENT/);
   assert.doesNotMatch(bootstrap, /missingKeys\(env, \["DISCORD_TOKEN", "MUSIC_TEXT_CHANNEL_ID"/);
   assert.match(guards, /not configured yet.*`\/setup`/s);
+  assert.match(setupPanel, /No role gate is enabled/);
 });
 
 test("runtime uses one canonical resolver and current dependency line", () => {
