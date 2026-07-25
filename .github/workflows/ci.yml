@@ -17,14 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install --ignore-scripts
-      - name: Capture generated dependency lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: stoney-music-package-lock
-          path: package-lock.json
-          if-no-files-found: error
-          retention-days: 1
+      - run: npm ci --ignore-scripts
       - run: npm run validate
       - name: Verify runtime imports
         run: node -e "require('./src/player'); require('./src/commands'); console.log('Runtime imports passed.')"
