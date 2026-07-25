@@ -1,0 +1,32 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and package-manager state
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime/generated files
+*.jar
+.lavalink-version
+plugins/
+logs/
+lavalink.log
+*.pid
+.cache/
+
+# Deployment archives and local backups
+*.zip
+*.tar
+*.tar.gz
+backup-*
+
+# Editors/OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
