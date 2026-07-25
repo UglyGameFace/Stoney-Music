@@ -1,7 +1,7 @@
 # Active Task — Restore Stoney Music playback
 
 ## Scope
-Restore and harden YouTube playback, tokenless Apple Music song/album resolution, and tokenless Spotify single-link resolution; repair queue lifecycle; sanitize and validate the project before publishing it to a new private GitHub repository.
+Restore and harden YouTube playback, tokenless Apple Music song/album resolution, and tokenless Spotify single-link resolution; repair queue lifecycle; sanitize, publish, and validate the project before deployment.
 
 ## Root-cause findings
 - The backup bundled Lavalink 4.1.2 and stale YouTube-source 1.16.0 configuration.
@@ -34,8 +34,8 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - Generic Discord/GitHub token and private-key pattern scan: passed.
 - Duplicate/conflict inspection: one resolver, one guild-player class, one player manager, and one interaction owner.
 - Node 22.16.0 and Java 21 local validation environment confirmed.
-- Dependency installation could not be completed in this sandbox because its npm registry was unreachable and no offline cache existed. GitHub CI is configured to install and validate dependencies once published.
-- Live Discord/Discloud playback smoke testing remains required because this environment has no bot token, voice connection, or outbound package/runtime access.
+- Dependency installation could not be completed in the sandbox because its npm registry was unreachable and no offline cache existed. GitHub CI is the authoritative dependency-installation gate.
+- Live Discord/Discloud playback smoke testing remains required because this environment has no bot token or voice connection.
 
 ## Cleanup status
 - Original backup remains untouched.
@@ -43,10 +43,13 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - Stale Lavalink/LavaSrc configuration and duplicate/obsolete resolver behavior were removed rather than retained as compatibility patches.
 
 ## Publication status
-The sanitized source is being published to `UglyGameFace/Stoney-Music`. The repository baseline must pass GitHub dependency installation and CI on the exact published commit before it is treated as merge/deployment-ready.
+- Sanitized source published to `UglyGameFace/Stoney-Music` on `main`.
+- Published baseline head before this record update: `beb55b124bd3915327dbeb37a613989d26795a41`.
+- Validation branch: `agent/validate-published-baseline`.
+- The branch changes only this task record; the runtime under CI is identical to the published baseline.
 
 ## Remaining external gates
-- GitHub Actions must install the real dependencies and pass the complete validation suite.
+- The validation pull request must install the real dependencies and pass the complete GitHub Actions suite.
 - A controlled Discloud smoke test must verify text search, direct YouTube playback, YouTube playlists, Apple Music song/album matching, Spotify track/mobile-link matching, skip/loop behavior, failure recovery, and process cleanup.
 
 ## Backlog
