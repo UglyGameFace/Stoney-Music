@@ -1,10 +1,7 @@
 "use strict";
 
 const { GuildPlayer } = require("./guild-player");
-const {
-  fallbackIdentityKey,
-  playbackCandidateKey,
-} = require("./playback-fallback");
+const { playbackCandidateKey } = require("./playback-fallback");
 
 const MAX_RUNTIME_FALLBACK_ATTEMPTS = 8;
 
@@ -69,6 +66,23 @@ class ResilientGuildPlayer extends GuildPlayer {
   }
 
   _copyRuntimeState(failed, replacement, remainingCandidates, triedKeys) {
+    const identity = failed.playbackIdentity ? { ...failed.playbackIdentity } : null;
+    const candidateTitle = replacement.playbackCandidateTitle || replacement.title;
+    const candidateAuthor = replacement.playbackCandidateAuthor || replacement.author;
+
+    replacement.playbackCandidateTitle = candidateTitle;
+    replacement.playbackCandidateAuthor = candidateAuthor;
+    replacement.playbackIdentity = identity;
+    replacement.title = identity?.title || failed.title || replacement.title;
+    replacement.author = identity?.artist || failed.author || replacement.author;
+    replacement.artworkUrl = identity?.artworkUrl || failed.artworkUrl || replacement.artworkUrl;
+    replacement.durationMs = identity?.durationMs || failed.durationMs || replacement.durationMs;
+    replacement.requestedQuery =
+      identity?.requestedQuery || failed.requestedQuery || replacement.requestedQuery || "";
+    replacement.originalTitle = failed.originalTitle || failed.title || replacement.title;
+    replacement.originalUri =
+      failed.originalUri || identity?.sourceUrl || failed.uri || replacement.uri || "";
+    replacement.fallbackFrom = failed.fallbackFrom || failed.sourceName || "unknown";
     replacement.autoplay = Boolean(failed.autoplay);
     replacement.autoplayProvider ||= failed.autoplayProvider;
     replacement.autoplaySeedTitle ||= failed.autoplaySeedTitle;
