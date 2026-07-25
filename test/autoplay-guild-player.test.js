@@ -68,7 +68,7 @@ async function connectedPlayer(resolveAutoplay) {
   return { player, fake, logs };
 }
 
-test("autoplay starts a related recommendation only after the human queue is empty", async () => {
+test("autoplay starts a related recommendation and prefetches the following one", async () => {
   const seed = track("Seed Song");
   const recommended = track("Related Song", {
     author: "Related Artist",
@@ -86,8 +86,9 @@ test("autoplay starts a related recommendation only after the human queue is emp
   await player.playNext();
   await player.setAutoplay(true);
   await player._handleTrackEnd({ reason: "finished", track: { encoded: seed.encoded } });
+  await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(calls, 1);
+  assert.equal(calls, 2, "the second lookup preloads the track after the active recommendation");
   assert.equal(player.nowPlaying(), recommended);
   assert.equal(player.autoplayStatus(), true);
   assert.deepEqual(fake.played, ["encoded-Seed Song", "encoded-related"]);
