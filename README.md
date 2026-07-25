@@ -11,7 +11,7 @@ A locked-down, single-server Discord music bot using Discord.js, Shoukaku, and L
 - Apple Music song and album links without Apple developer credentials by using public Apple/iTunes metadata, then finding a playable match.
 - Individual Spotify track and episode links without Spotify OAuth by using Spotify's official oEmbed metadata, then finding a playable match.
 - Queue event serialization so skips, loops, failures, and stale end events cannot double-advance or replay the wrong track.
-- Safe process supervision for Lavalink and Node on Discloud.
+- A JavaScript bootstrap that Discloud runs as its actual `MAIN`; it starts Lavalink, waits for readiness, then starts and supervises the Discord bot.
 - Secret-safe repository/deployment files and automated regression tests.
 
 ## Supported input
@@ -74,7 +74,7 @@ node scripts/doctor.js
 
 ## Run locally
 
-`start.sh` supervises both Lavalink and Node. It downloads the official pinned Lavalink JAR if version 4.2.2 is not already present.
+`src/bootstrap.js` is the canonical launcher used by Discloud, npm, and `start.sh`. It downloads the official pinned Lavalink JAR if needed, starts Java, waits until port 2333 is accepting connections, and only then starts the Discord bot. If either process stops, it cleans up the other so Discloud can restart the whole service safely.
 
 ```bash
 cp .env.example .env
@@ -89,11 +89,25 @@ The first startup also downloads the pinned YouTube source plugin from the offic
 The included `discloud.config`:
 
 - installs `tools`, `ffmpeg`, and Java;
-- installs the exact dependency tree from `package-lock.json`;
-- runs `bash start.sh`;
+- installs the locked Node dependencies with `npm ci`;
+- sets `MAIN=src/bootstrap.js`, so startup remains correct even if Discloud ignores a custom `START` command;
 - allocates 2 GB RAM.
 
 Upload a ZIP containing the project root. Do not include `.env`, `node_modules`, logs, plugin downloads, or a stale Lavalink JAR. Configure secrets in the Discloud environment panel.
+
+### Expected startup order
+
+A healthy Discloud boot should show this order before Discord login:
+
+1. one environment-file message;
+2. Java version detection;
+3. Lavalink download or installed-version confirmation;
+4. `Starting Lavalink`;
+5. `Lavalink is accepting connections`;
+6. `Starting Stoney Music bot`;
+7. Discord login and slash-command registration.
+
+Seeing `(node:1)` immediately followed by `ECONNREFUSED 127.0.0.1:2333` means an old deployment is still launching `src/index.js` directly instead of the bootstrap. Redeploy the current project root so Discloud reads the updated `discloud.config`.
 
 ## YouTube caveats
 
