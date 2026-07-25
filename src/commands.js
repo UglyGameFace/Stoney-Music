@@ -1,9 +1,30 @@
 "use strict";
 
-const { SlashCommandBuilder } = require("discord.js");
+const { ChannelType, PermissionFlagsBits, SlashCommandBuilder } = require("discord.js");
 
 function buildCommands() {
   return [
+    new SlashCommandBuilder()
+      .setName("setup")
+      .setDescription("Configure Stoney Music for this server")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addChannelOption((option) =>
+        option
+          .setName("music_channel")
+          .setDescription("Channel for Stoney Music commands; defaults to this channel")
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+      )
+      .addRoleOption((option) =>
+        option
+          .setName("verified_role")
+          .setDescription("Optional verified role required to use music commands")
+      )
+      .addRoleOption((option) =>
+        option
+          .setName("resident_role")
+          .setDescription("Optional resident/member role required to use music commands")
+      ),
+
     new SlashCommandBuilder()
       .setName("play")
       .setDescription("Play a song, playlist, or supported music link")
