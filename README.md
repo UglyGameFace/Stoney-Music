@@ -37,9 +37,9 @@ After installing the app to the server with both `bot` and `applications.command
 
 Use `/setup` as a server admin when Discord displays the slash commands. The music channel defaults to the channel where setup is run. Role restrictions are optional and are only enabled when roles are explicitly selected.
 
-If Discord accepts the commands but a client does not display them, Stoney Music posts a recovery setup card in the configured/default channel or the first text channel it can use. A server admin can press **Set Up In This Channel** to finish setup without using the command picker. The recovery path enables no role gate.
+If Discord accepts the commands but a client does not display them, Stoney Music posts one recovery setup card in the configured guild. A server admin chooses the real music channel from Discord's native channel picker; **Use This Channel** remains available as a shortcut. The choice is saved at runtime, not hard-coded in source or environment variables.
 
-The saved setup is reused after restarts. Once setup is saved, the recovery card is not posted again.
+After selection, Stoney Music posts a ready card in the chosen channel with clickable references to the registered commands. The saved setup is reused after restarts, and the bot records the recovery panel so ordinary restarts do not generate additional cards.
 
 ## Environment setup
 
@@ -53,7 +53,6 @@ Required:
 Optional:
 
 - `GUILD_ID` — the bot auto-detects its server when connected to exactly one
-- `MUSIC_TEXT_CHANNEL_ID` — legacy/default channel; setup replaces it with the saved selection
 - `MUSIC_CONFIG_PATH` — override the saved runtime configuration path
 
 No server role names are assumed. Access roles are optional and setup-managed.
@@ -82,7 +81,7 @@ For the fastest and clearest registration, set `GUILD_ID` to the exact server wh
 When setup has not been saved, a healthy recovery startup also logs:
 
 ```text
-🧰 Posted Stoney Music recovery setup panel in #channel-name (CHANNEL_ID); message=MESSAGE_ID.
+🧰 Posted one Stoney Music setup panel for Server Name in #channel-name (CHANNEL_ID); message=MESSAGE_ID.
 ```
 
 On a one-server deployment, a missing or stale `GUILD_ID` is recovered automatically from the connected server. Multi-server deployments still require an exact `GUILD_ID` for immediate guild commands.
@@ -133,7 +132,7 @@ The included `discloud.config`:
 - sets `MAIN=src/bootstrap.js`, so startup remains correct even if Discloud ignores a custom `START` command;
 - allocates 2 GB RAM.
 
-Upload a ZIP containing the project root. Do not include `.env`, `node_modules`, logs, plugin downloads, or a stale Lavalink JAR. Configure secrets and settings in the Discloud environment panel.
+Use Discloud's GitHub integration for normal deployments. Configure secrets and settings in the Discloud environment panel; do not commit `.env`, `node_modules`, logs, plugin downloads, or a stale Lavalink JAR.
 
 ### Expected startup order
 
@@ -146,7 +145,7 @@ A healthy Discloud boot should show this order before Discord login:
 5. `Lavalink is accepting connections`;
 6. `Starting Stoney Music bot`;
 7. Discord login and slash-command registration;
-8. recovery setup-panel post when setup has not yet been saved.
+8. one recovery setup-panel post when setup has not yet been saved.
 
 Seeing `(node:1)` immediately followed by `ECONNREFUSED 127.0.0.1:2333` means an old deployment is still launching `src/index.js` directly instead of the bootstrap. Redeploy the current project root so Discloud reads the updated `discloud.config`.
 
