@@ -51,21 +51,61 @@ test("guild command sync verifies the connected server and reports accepted name
   assert.match(logs.join("\n"), /\/play, \/queue/);
 });
 
-test("guild command sync fails loudly when GUILD_ID targets the wrong server", async () => {
+test("wrong GUILD_ID recovers to the only connected server", async () => {
+  const warnings = [];
+  const result = await syncApplicationCommands({
+    rest: { put: async (_route, options) => options.body },
+    applicationId: "111111111111111111",
+    guildId: "999999999999999999",
+    guilds: fakeGuilds([{ id: "222222222222222222", name: "Stoney Balonney" }]),
+    commands: [{ name: "setup" }],
+    logger: { log() {}, warn: (message) => warnings.push(message) },
+  });
+  assert.equal(result.guildId, "222222222222222222");
+  assert.match(warnings.join("\n"), /Configured GUILD_ID 999999999999999999 is not connected/);
+});
+
+test("wrong GUILD_ID still fails when more than one server is connected", async () => {
   await assert.rejects(
     syncApplicationCommands({
       rest: { put: async () => [] },
       applicationId: "111111111111111111",
       guildId: "999999999999999999",
-      guilds: fakeGuilds([{ id: "222222222222222222", name: "Stoney Balonney" }]),
+      guilds: fakeGuilds([
+        { id: "222222222222222222", name: "Stoney Balonney" },
+        { id: "333333333333333333", name: "Other Server" },
+      ]),
       commands: [{ name: "play" }],
       logger: { log() {}, warn() {} },
     }),
-    /GUILD_ID 999999999999999999 is not a server this bot is connected to.*Stoney Balonney/
+    /GUILD_ID 999999999999999999 is not a server this bot is connected to/
   );
 });
 
-test("missing GUILD_ID uses global registration and emits a warning", async () => {
+test("missing GUILD_ID auto-detects the only connected server", async () => {
+  const warnings = [];
+  const calls = [];
+  const result = await syncApplicationCommands({
+    rest: {
+      put: async (route, options) => {
+        calls.push(route);
+        return options.body;
+      },
+    },
+    applicationId: "111111111111111111",
+    guildId: null,
+    guilds: fakeGuilds([{ id: "222222222222222222", name: "Stoney Balonney" }]),
+    commands: [{ name: "setup" }, { name: "play" }],
+    logger: { log() {}, warn: (message) => warnings.push(message) },
+  });
+
+  assert.equal(result.scope, "guild");
+  assert.equal(result.guildId, "222222222222222222");
+  assert.match(calls[0], /guilds\/222222222222222222\/commands/);
+  assert.match(warnings.join("\n"), /Auto-detected/);
+});
+
+test("missing GUILD_ID uses global registration when no single server is available", async () => {
   const warnings = [];
   const result = await syncApplicationCommands({
     rest: { put: async (_route, options) => options.body },
@@ -77,5 +117,5 @@ test("missing GUILD_ID uses global registration and emits a warning", async () =
   });
 
   assert.equal(result.scope, "global");
-  assert.match(warnings.join("\n"), /GUILD_ID is not set/);
+  assert.match(warnings.join("\n"), /zero or multiple servers/);
 });
