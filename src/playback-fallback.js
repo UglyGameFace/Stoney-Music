@@ -37,10 +37,10 @@ function normalizeText(value) {
 
 function cleanDisplayTitle(value) {
   return String(value || "")
-    .replace(/[[(]\s*(?:official\s+)?(?:music\s+)?video\s*[])]/gi, " ")
-    .replace(/[[(]\s*(?:official\s+)?audio\s*[])]/gi, " ")
-    .replace(/[[(]\s*(?:official\s+)?lyrics?\s*[])]/gi, " ")
-    .replace(/[[(]\s*(?:official\s+)?visuali[sz]er\s*[])]/gi, " ")
+    .replace(
+      /[\[(]\s*(?:official\s+)?(?:(?:music\s+)?video|audio|lyrics?|visuali[sz]er)\s*[\])]/gi,
+      " "
+    )
     .replace(/\s+/g, " ")
     .trim();
 }
