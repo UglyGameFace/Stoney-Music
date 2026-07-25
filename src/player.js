@@ -1,6 +1,7 @@
 "use strict";
 
 const { Shoukaku } = require("shoukaku");
+const { resolveAutoplayRecommendation } = require("./autoplay");
 const { GuildPlayer } = require("./guild-player");
 const { resolvePlaybackFallback } = require("./playback-fallback");
 const { resolveMusicQuery } = require("./resolver");
@@ -36,16 +37,22 @@ class PlayerManager {
   }
 
   get(guildId) {
-    if (!this.guildPlayers.has(guildId)) {
+    const key = String(guildId);
+    if (!this.guildPlayers.has(key)) {
       this.guildPlayers.set(
-        guildId,
-        new GuildPlayer(this.shoukaku, guildId, {
+        key,
+        new GuildPlayer(this.shoukaku, key, {
           logger: this.logger,
           resolveFallback: (track) => this.resolveFallback(track),
+          resolveAutoplay: (seed, context) => this.resolveAutoplay(seed, context),
         })
       );
     }
-    return this.guildPlayers.get(guildId);
+    return this.guildPlayers.get(key);
+  }
+
+  peek(guildId) {
+    return this.guildPlayers.get(String(guildId)) || null;
   }
 
   _node() {
@@ -61,6 +68,14 @@ class PlayerManager {
   async resolveFallback(track, options = {}) {
     return resolvePlaybackFallback(track, {
       ...options,
+      resolve: (identifier) => this.resolve(identifier),
+    });
+  }
+
+  async resolveAutoplay(seed, options = {}) {
+    return resolveAutoplayRecommendation(seed, {
+      ...options,
+      logger: this.logger,
       resolve: (identifier) => this.resolve(identifier),
     });
   }
