@@ -227,6 +227,18 @@ async function handleSetupPanelInteraction(
     return true;
   }
 
+  const current = configStore.get?.(interaction.guildId) || {};
+  if (
+    current.setupPanelMessageId &&
+    interaction.message?.id !== current.setupPanelMessageId
+  ) {
+    await interaction.reply({
+      content: "That is an old Stoney Music setup card. Use the newest card with the channel picker.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
   const channel = await resolveSelectedChannel(interaction);
   if (!isUsableSetupChannel(channel, interaction.guild)) {
     await interaction.reply({
