@@ -1,0 +1,84 @@
+server:
+  port: ${LAVALINK_PORT:2333}
+  address: 0.0.0.0
+  http2:
+    enabled: false
+
+lavalink:
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
+      repository: "https://maven.lavalink.dev/releases"
+      snapshot: false
+
+  server:
+    password: "${LAVALINK_PASSWORD}"
+
+    sources:
+      # Lavalink's built-in YouTube source is deprecated. youtube-source owns it.
+      youtube: false
+      soundcloud: true
+      bandcamp: true
+      twitch: true
+      vimeo: true
+      nico: true
+      # The bot never accepts arbitrary HTTP audio or local file paths.
+      http: false
+      local: false
+
+    filters:
+      volume: true
+      equalizer: true
+      karaoke: true
+      timescale: true
+      tremolo: true
+      vibrato: true
+      distortion: true
+      rotation: true
+      channelMix: true
+      lowPass: true
+
+    bufferDurationMs: 400
+    frameBufferDurationMs: 5000
+    opusEncodingQuality: 10
+    resamplingQuality: MEDIUM
+    trackStuckThresholdMs: 10000
+    useSeekGhosting: true
+    playerUpdateInterval: 5
+
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+
+    # Current youtube-source client names. Retired and renamed identifiers must not return.
+    clients:
+      - MUSIC
+      - ANDROID_VR
+      - WEB
+      - WEBEMBEDDED
+      - TVHTML5_SIMPLY
+
+    playlistLoadLimit: 100
+    searchLimit: 10
+
+    # OAuth and poToken are intentionally not enabled by default. Maintainers
+    # warn that neither is a universal fix and OAuth can rate-limit or ban the
+    # attached Google account. Add them only after reviewing current docs.
+
+logging:
+  file:
+    path: ./logs/
+    max-history: 2
+    max-size: 10MB
+  level:
+    root: INFO
+    lavalink: INFO
+    dev.lavalink.youtube: INFO
+  request:
+    enabled: false
+    includeClientInfo: false
+    includeHeaders: false
+    includeQueryString: false
+    includePayload: false
