@@ -41,6 +41,20 @@ function buildCommands() {
     new SlashCommandBuilder().setName("nowplaying").setDescription("Show the current track"),
 
     new SlashCommandBuilder()
+      .setName("autoplay")
+      .setDescription("Continue with related music when the human queue ends")
+      .addStringOption((option) =>
+        option
+          .setName("mode")
+          .setDescription("Enable or disable similar-music autoplay")
+          .setRequired(true)
+          .addChoices(
+            { name: "On — play related music", value: "on" },
+            { name: "Off", value: "off" }
+          )
+      ),
+
+    new SlashCommandBuilder()
       .setName("volume")
       .setDescription("Set playback volume")
       .addIntegerOption((option) =>
