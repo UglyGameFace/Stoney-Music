@@ -2,6 +2,7 @@
 
 const { Shoukaku } = require("shoukaku");
 const { resolveAutoplayRecommendation } = require("./autoplay");
+const { refineInitialResolution } = require("./initial-track-selector");
 const { PlaybackMatchCache } = require("./playback-cache");
 const {
   fallbackIdentityKey,
@@ -109,8 +110,11 @@ class PlayerManager {
   }
 
   async resolveQuery(query, options = {}) {
-    return resolveMusicQuery(query, {
+    const resolution = await resolveMusicQuery(query, {
       ...options,
+      resolve: (identifier) => this.resolve(identifier),
+    });
+    return refineInitialResolution(resolution, query, {
       resolve: (identifier) => this.resolve(identifier),
     });
   }
