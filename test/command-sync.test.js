@@ -4,15 +4,12 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  clearLegacyGuildCommands,
   commandIdMap,
   commandNames,
   syncApplicationCommands,
   verifyRegisteredCommands,
 } = require("../src/command-sync");
-
-function fakeGuilds(entries) {
-  return { cache: new Map(entries.map((guild) => [guild.id, guild])) };
-}
 
 test("commandNames returns sorted slash-command names", () => {
   assert.deepEqual(commandNames([{ name: "skip" }, { name: "play" }]), ["play", "skip"]);
@@ -36,13 +33,50 @@ test("verifyRegisteredCommands rejects incomplete Discord responses", () => {
   );
 });
 
-test("guild command sync verifies the connected server and reports accepted names", async () => {
+test("public sync always registers one global command set", async () => {
   const calls = [];
   const logs = [];
   const rest = {
     async put(route, options) {
-      calls.push({ route, options });
+      calls.push({ method: "put", route, options });
       return options.body.map((command, index) => ({ ...command, id: String(index + 1) }));
+    },
+    async get(route) {
+      calls.push({ method: "get", route });
+      return [];
+    },
+  };
+
+  const result = await syncApplicationCommands({
+    rest,
+    applicationId: "111111111111111111",
+    guildId: null,
+    commands: [{ name: "play" }, { name: "queue" }],
+    logger: { log: (message) => logs.push(message), warn: (message) => logs.push(message) },
+  });
+
+  assert.equal(result.scope, "global");
+  assert.equal(result.guildId, null);
+  assert.deepEqual(result.commandNames, ["play", "queue"]);
+  assert.deepEqual(result.commandIds, { play: "1", queue: "2" });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].route, /applications\/111111111111111111\/commands$/);
+  assert.doesNotMatch(calls[0].route, /guilds/);
+  assert.match(logs.join("\n"), /public global commands/);
+});
+
+test("legacy GUILD_ID is used only to remove the old guild-only command set", async () => {
+  const calls = [];
+  const logs = [];
+  const rest = {
+    async put(route, options) {
+      calls.push({ method: "put", route, options });
+      if (options.body.length === 0) return [];
+      return options.body.map((command, index) => ({ ...command, id: String(index + 1) }));
+    },
+    async get(route) {
+      calls.push({ method: "get", route });
+      return [{ id: "old", name: "play" }];
     },
   };
 
@@ -50,85 +84,47 @@ test("guild command sync verifies the connected server and reports accepted name
     rest,
     applicationId: "111111111111111111",
     guildId: "222222222222222222",
-    guilds: fakeGuilds([{ id: "222222222222222222", name: "Stoney Balonney" }]),
-    commands: [{ name: "play" }, { name: "queue" }],
+    commands: [{ name: "play" }],
     logger: { log: (message) => logs.push(message), warn: (message) => logs.push(message) },
   });
 
-  assert.equal(result.scope, "guild");
-  assert.deepEqual(result.commandNames, ["play", "queue"]);
-  assert.deepEqual(result.commandIds, { play: "1", queue: "2" });
-  assert.equal(calls.length, 1);
-  assert.match(calls[0].route, /applications\/111111111111111111\/guilds\/222222222222222222\/commands/);
-  assert.match(logs.join("\n"), /Discord accepted 2 guild commands/);
-  assert.match(logs.join("\n"), /\/play, \/queue/);
+  assert.equal(result.scope, "global");
+  assert.equal(calls[0].method, "put");
+  assert.doesNotMatch(calls[0].route, /guilds/);
+  assert.match(calls[1].route, /guilds\/222222222222222222\/commands$/);
+  assert.equal(calls[2].method, "put");
+  assert.deepEqual(calls[2].options.body, []);
+  assert.match(logs.join("\n"), /Removed 1 legacy guild-only commands/);
 });
 
-test("wrong GUILD_ID recovers to the only connected server", async () => {
+test("legacy cleanup failure does not undo successful public registration", async () => {
   const warnings = [];
-  const result = await syncApplicationCommands({
-    rest: { put: async (_route, options) => options.body },
-    applicationId: "111111111111111111",
-    guildId: "999999999999999999",
-    guilds: fakeGuilds([{ id: "222222222222222222", name: "Stoney Balonney" }]),
-    commands: [{ name: "setup" }],
-    logger: { log() {}, warn: (message) => warnings.push(message) },
-  });
-  assert.equal(result.guildId, "222222222222222222");
-  assert.match(warnings.join("\n"), /Configured GUILD_ID 999999999999999999 is not connected/);
-});
-
-test("wrong GUILD_ID still fails when more than one server is connected", async () => {
-  await assert.rejects(
-    syncApplicationCommands({
-      rest: { put: async () => [] },
-      applicationId: "111111111111111111",
-      guildId: "999999999999999999",
-      guilds: fakeGuilds([
-        { id: "222222222222222222", name: "Stoney Balonney" },
-        { id: "333333333333333333", name: "Other Server" },
-      ]),
-      commands: [{ name: "play" }],
-      logger: { log() {}, warn() {} },
-    }),
-    /GUILD_ID 999999999999999999 is not a server this bot is connected to/
-  );
-});
-
-test("missing GUILD_ID auto-detects the only connected server", async () => {
-  const warnings = [];
-  const calls = [];
-  const result = await syncApplicationCommands({
-    rest: {
-      put: async (route, options) => {
-        calls.push(route);
-        return options.body;
-      },
+  const rest = {
+    async put(_route, options) {
+      return options.body.map((command, index) => ({ ...command, id: String(index + 1) }));
     },
-    applicationId: "111111111111111111",
-    guildId: null,
-    guilds: fakeGuilds([{ id: "222222222222222222", name: "Stoney Balonney" }]),
-    commands: [{ name: "setup" }, { name: "play" }],
-    logger: { log() {}, warn: (message) => warnings.push(message) },
-  });
+    async get() {
+      throw new Error("missing access");
+    },
+  };
 
-  assert.equal(result.scope, "guild");
-  assert.equal(result.guildId, "222222222222222222");
-  assert.match(calls[0], /guilds\/222222222222222222\/commands/);
-  assert.match(warnings.join("\n"), /Auto-detected/);
-});
-
-test("missing GUILD_ID uses global registration when no single server is available", async () => {
-  const warnings = [];
   const result = await syncApplicationCommands({
-    rest: { put: async (_route, options) => options.body },
+    rest,
     applicationId: "111111111111111111",
-    guildId: null,
-    guilds: fakeGuilds([]),
-    commands: [{ name: "play" }],
+    guildId: "222222222222222222",
+    commands: [{ name: "setup" }],
     logger: { log() {}, warn: (message) => warnings.push(message) },
   });
 
   assert.equal(result.scope, "global");
-  assert.match(warnings.join("\n"), /zero or multiple servers/);
+  assert.match(warnings.join("\n"), /Could not remove legacy guild-only commands/);
+});
+
+test("clearLegacyGuildCommands is a no-op without a migration guild ID", async () => {
+  const cleared = await clearLegacyGuildCommands({
+    rest: { get: async () => assert.fail("should not query") },
+    applicationId: "111111111111111111",
+    legacyGuildId: null,
+  });
+  assert.equal(cleared, false);
 });
