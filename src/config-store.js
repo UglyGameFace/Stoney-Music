@@ -23,6 +23,8 @@ function normalizeGuildConfig(value = {}, defaults = {}) {
     roleVerified: configuredValue(value, defaults, "roleVerified"),
     roleResidentId: configuredValue(value, defaults, "roleResidentId"),
     roleResident: configuredValue(value, defaults, "roleResident"),
+    setupPanelChannelId: configuredValue(value, defaults, "setupPanelChannelId"),
+    setupPanelMessageId: configuredValue(value, defaults, "setupPanelMessageId"),
   };
 }
 
@@ -30,6 +32,8 @@ class GuildConfigStore {
   constructor({ filePath = process.env.MUSIC_CONFIG_PATH || DEFAULT_CONFIG_PATH, defaults = {} } = {}) {
     this.filePath = path.resolve(filePath);
     this.defaults = normalizeGuildConfig(defaults);
+    // Channel selection is setup-managed. Ignore any leftover environment default from older deployments.
+    this.defaults.musicTextChannelId = null;
     this.guilds = {};
     this.loaded = false;
   }

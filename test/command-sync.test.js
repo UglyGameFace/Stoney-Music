@@ -4,6 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  commandIdMap,
   commandNames,
   syncApplicationCommands,
   verifyRegisteredCommands,
@@ -15,6 +16,17 @@ function fakeGuilds(entries) {
 
 test("commandNames returns sorted slash-command names", () => {
   assert.deepEqual(commandNames([{ name: "skip" }, { name: "play" }]), ["play", "skip"]);
+});
+
+test("commandIdMap exposes clickable mention IDs by command name", () => {
+  assert.deepEqual(
+    commandIdMap([
+      { id: "111", name: "play" },
+      { id: "222", name: "setup" },
+      { name: "missing-id" },
+    ]),
+    { play: "111", setup: "222" }
+  );
 });
 
 test("verifyRegisteredCommands rejects incomplete Discord responses", () => {
@@ -45,6 +57,7 @@ test("guild command sync verifies the connected server and reports accepted name
 
   assert.equal(result.scope, "guild");
   assert.deepEqual(result.commandNames, ["play", "queue"]);
+  assert.deepEqual(result.commandIds, { play: "1", queue: "2" });
   assert.equal(calls.length, 1);
   assert.match(calls[0].route, /applications\/111111111111111111\/guilds\/222222222222222222\/commands/);
   assert.match(logs.join("\n"), /Discord accepted 2 guild commands/);

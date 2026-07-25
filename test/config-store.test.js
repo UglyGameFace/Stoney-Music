@@ -8,7 +8,7 @@ const path = require("node:path");
 
 const { GuildConfigStore } = require("../src/config-store");
 
-test("guild setup persists and reloads channel and optional role IDs", async (t) => {
+test("guild setup persists channel, optional roles, and recovery panel identity", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stoney-config-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const filePath = path.join(directory, "guild-config.json");
@@ -22,6 +22,8 @@ test("guild setup persists and reloads channel and optional role IDs", async (t)
     roleVerified: "Optional Access Role",
     roleResidentId: null,
     roleResident: null,
+    setupPanelChannelId: "111",
+    setupPanelMessageId: "222",
   });
   assert.equal(first.hasSavedSetup("123"), true);
 
@@ -34,16 +36,31 @@ test("guild setup persists and reloads channel and optional role IDs", async (t)
     roleVerified: "Optional Access Role",
     roleResidentId: null,
     roleResident: null,
+    setupPanelChannelId: "111",
+    setupPanelMessageId: "222",
   });
 });
 
-test("guild setup can use a legacy channel default without treating it as a completed setup", async () => {
+test("recording a recovery panel does not count as completed music setup", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stoney-panel-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const store = new GuildConfigStore({ filePath: path.join(directory, "guild-config.json") });
+  await store.load();
+  await store.set("123", {
+    setupPanelChannelId: "111",
+    setupPanelMessageId: "222",
+  });
+  assert.equal(store.hasSavedSetup("123"), false);
+  assert.equal(store.get("123").setupPanelMessageId, "222");
+});
+
+test("legacy environment channel defaults are ignored until setup explicitly saves a channel", async () => {
   const store = new GuildConfigStore({
     filePath: path.join(os.tmpdir(), `missing-stoney-${Date.now()}.json`),
-    defaults: { musicTextChannelId: "111" },
+    defaults: { musicTextChannelId: "old-channel" },
   });
   await store.load();
-  assert.equal(store.get("123").musicTextChannelId, "111");
+  assert.equal(store.get("123").musicTextChannelId, null);
   assert.equal(store.hasSavedSetup("123"), false);
 });
 
@@ -61,4 +78,5 @@ test("setup stores no role gate when roles are not explicitly selected", async (
   });
   assert.equal(saved.roleVerified, null);
   assert.equal(saved.roleResident, null);
+  assert.equal(saved.setupPanelMessageId, null);
 });

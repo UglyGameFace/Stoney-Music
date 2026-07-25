@@ -4,6 +4,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelSelectMenuBuilder,
   ChannelType,
   EmbedBuilder,
   MessageFlags,
@@ -11,6 +12,42 @@ const {
 } = require("discord.js");
 
 const SETUP_BUTTON_ID = "stoney_music:setup_here";
+const SETUP_CHANNEL_SELECT_ID = "stoney_music:setup_channel";
+const COMMAND_ORDER = [
+  "setup",
+  "play",
+  "queue",
+  "nowplaying",
+  "skip",
+  "stop",
+  "volume",
+  "loop",
+  "filter",
+];
+
+function commandIdMap(commands) {
+  return Object.fromEntries(
+    [...commands.values()]
+      .filter((command) => command?.id && command?.name)
+      .map((command) => [String(command.name), String(command.id)])
+  );
+}
+
+async function resolveCommandIds(guild, commandIds = {}) {
+  if (Object.keys(commandIds).length) return commandIds;
+  try {
+    return commandIdMap(await guild.commands.fetch());
+  } catch {
+    return {};
+  }
+}
+
+function formatCommandMentions(commandIds = {}) {
+  return COMMAND_ORDER.map((name) => {
+    const id = commandIds[name];
+    return id ? `</${name}:${id}>` : `/${name}`;
+  }).join(" • ");
+}
 
 function isUsableSetupChannel(channel, guild) {
   if (!channel || !guild) return false;
@@ -40,50 +77,89 @@ function chooseSetupChannel(guild, preferredChannelId = null) {
   );
 }
 
-function buildSetupPanel() {
+function buildSetupPanel(commandIds = {}) {
   const embed = new EmbedBuilder()
     .setTitle("🎵 Stoney Music Setup")
     .setDescription(
       "Discord accepted the slash commands, but the mobile command picker is not displaying them. " +
-        "Use the button below to configure Stoney Music in this channel without relying on slash commands."
+        "Choose the channel where Stoney Music should be used. Nothing is hard-coded."
     )
     .addFields(
       {
-        name: "What the button does",
-        value: "Sets this channel as the music channel. No role restriction is enabled unless you choose one later.",
+        name: "Choose the music channel",
+        value:
+          "Use the channel picker below, or press **Use This Channel** as a shortcut. " +
+          "No role restriction is enabled unless you choose one later.",
       },
       {
-        name: "Who can use it",
+        name: "Registered commands",
+        value: formatCommandMentions(commandIds),
+      },
+      {
+        name: "Who can configure it",
         value: "Server owner or anyone with **Manage Server**.",
       }
     )
-    .setFooter({ text: "This recovery panel becomes inactive after setup succeeds." });
+    .setFooter({ text: "Only one saved channel is used for music commands." });
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(SETUP_BUTTON_ID)
-      .setLabel("Set Up In This Channel")
-      .setEmoji("🎛️")
-      .setStyle(ButtonStyle.Primary)
+  const pickerRow = new ActionRowBuilder().addComponents(
+    new ChannelSelectMenuBuilder()
+      .setCustomId(SETUP_CHANNEL_SELECT_ID)
+      .setPlaceholder("Choose the Stoney Music commands channel")
+      .setMinValues(1)
+      .setMaxValues(1)
+      .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
   );
 
-  return { embeds: [embed], components: [row] };
+  const buttonRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(SETUP_BUTTON_ID)
+      .setLabel("Use This Channel")
+      .setEmoji("🎛️")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  return { embeds: [embed], components: [pickerRow, buttonRow] };
 }
 
-function buildSetupCompleteEmbed(saved) {
+function buildSetupCompleteEmbed(saved, commandIds = {}) {
   return new EmbedBuilder()
-    .setTitle("✅ Stoney Music Setup Complete")
-    .setDescription(`Music controls are configured for <#${saved.musicTextChannelId}>.`)
-    .addFields({ name: "Access gate", value: "No role gate is enabled." })
-    .setFooter({ text: "The slash commands remain registered; this panel bypassed the picker issue." });
+    .setTitle("✅ Stoney Music Ready")
+    .setDescription(`Music commands are restricted to <#${saved.musicTextChannelId}>.`)
+    .addFields(
+      { name: "Access gate", value: "No role gate is enabled." },
+      { name: "Commands", value: formatCommandMentions(commandIds) }
+    )
+    .setFooter({ text: "The channel was selected in Discord and is not hard-coded." });
 }
 
-async function postSetupPanels({ client, configStore, logger = console }) {
-  for (const guild of client.guilds.cache.values()) {
+async function postSetupPanels({
+  client,
+  configStore,
+  targetGuildId = null,
+  commandIds = {},
+  logger = console,
+}) {
+  const effectiveGuildId = targetGuildId || process.env.GUILD_ID || null;
+  const guilds = effectiveGuildId
+    ? [client.guilds.cache.get(effectiveGuildId)].filter(Boolean)
+    : client.guilds.cache.size === 1
+      ? [...client.guilds.cache.values()]
+      : [];
+
+  for (const guild of guilds) {
     if (configStore.hasSavedSetup(guild.id)) continue;
 
     const current = configStore.get(guild.id);
-    const channel = chooseSetupChannel(guild, current.musicTextChannelId);
+    if (current.setupPanelMessageId) {
+      logger.log?.(
+        `🧰 Stoney Music setup panel already recorded for ${guild.name} (${guild.id}): ` +
+          `channel=${current.setupPanelChannelId || "unknown"} message=${current.setupPanelMessageId}.`
+      );
+      continue;
+    }
+
+    const channel = chooseSetupChannel(guild, current.setupPanelChannelId);
     if (!channel) {
       logger.error?.(
         `❌ Could not post Stoney Music setup panel in ${guild.name} (${guild.id}): ` +
@@ -93,9 +169,14 @@ async function postSetupPanels({ client, configStore, logger = console }) {
     }
 
     try {
-      const message = await channel.send(buildSetupPanel());
+      const resolvedCommandIds = await resolveCommandIds(guild, commandIds);
+      const message = await channel.send(buildSetupPanel(resolvedCommandIds));
+      await configStore.set(guild.id, {
+        setupPanelChannelId: channel.id,
+        setupPanelMessageId: message.id,
+      });
       logger.log?.(
-        `🧰 Posted Stoney Music recovery setup panel in #${channel.name} (${channel.id}); ` +
+        `🧰 Posted one Stoney Music setup panel for ${guild.name} in #${channel.name} (${channel.id}); ` +
           `message=${message.id}.`
       );
     } catch (error) {
@@ -107,8 +188,31 @@ async function postSetupPanels({ client, configStore, logger = console }) {
   }
 }
 
-async function handleSetupPanelInteraction(interaction, { configStore, logger = console }) {
-  if (!interaction.isButton() || interaction.customId !== SETUP_BUTTON_ID) return false;
+async function resolveSelectedChannel(interaction) {
+  if (interaction.isButton() && interaction.customId === SETUP_BUTTON_ID) {
+    return interaction.channel;
+  }
+
+  if (interaction.isChannelSelectMenu() && interaction.customId === SETUP_CHANNEL_SELECT_ID) {
+    const channelId = interaction.values?.[0];
+    if (!channelId) return null;
+    return (
+      interaction.guild.channels.cache.get(channelId) ||
+      interaction.guild.channels.fetch(channelId)
+    );
+  }
+
+  return null;
+}
+
+async function handleSetupPanelInteraction(
+  interaction,
+  { configStore, commandIds = {}, logger = console }
+) {
+  const isSetupButton = interaction.isButton() && interaction.customId === SETUP_BUTTON_ID;
+  const isSetupPicker =
+    interaction.isChannelSelectMenu() && interaction.customId === SETUP_CHANNEL_SELECT_ID;
+  if (!isSetupButton && !isSetupPicker) return false;
 
   if (!interaction.inGuild()) {
     await interaction.reply({ content: "Server only.", flags: MessageFlags.Ephemeral });
@@ -123,10 +227,11 @@ async function handleSetupPanelInteraction(interaction, { configStore, logger = 
     return true;
   }
 
-  const channel = interaction.channel;
+  const channel = await resolveSelectedChannel(interaction);
   if (!isUsableSetupChannel(channel, interaction.guild)) {
     await interaction.reply({
-      content: "Stoney Tunes cannot use this channel. Allow View Channel, Send Messages, and Embed Links first.",
+      content:
+        "Stoney Tunes cannot use that channel. Allow View Channel, Send Messages, and Embed Links first.",
       flags: MessageFlags.Ephemeral,
     });
     return true;
@@ -138,9 +243,18 @@ async function handleSetupPanelInteraction(interaction, { configStore, logger = 
     roleVerified: null,
     roleResidentId: null,
     roleResident: null,
+    setupPanelChannelId: interaction.channelId || interaction.channel?.id || null,
+    setupPanelMessageId: interaction.message?.id || null,
   });
 
-  await interaction.update({ embeds: [buildSetupCompleteEmbed(saved)], components: [] });
+  const resolvedCommandIds = await resolveCommandIds(interaction.guild, commandIds);
+  const completeEmbed = buildSetupCompleteEmbed(saved, resolvedCommandIds);
+  await interaction.update({ embeds: [completeEmbed], components: [] });
+
+  if (channel.id !== interaction.channelId) {
+    await channel.send({ embeds: [completeEmbed], allowedMentions: { parse: [] } });
+  }
+
   logger.log?.(
     `✅ Stoney Music recovery setup completed for ${interaction.guild.name} (${interaction.guildId}): ` +
       `channel=${saved.musicTextChannelId} roleGate=none`
@@ -149,11 +263,17 @@ async function handleSetupPanelInteraction(interaction, { configStore, logger = 
 }
 
 module.exports = {
+  COMMAND_ORDER,
   SETUP_BUTTON_ID,
+  SETUP_CHANNEL_SELECT_ID,
   buildSetupCompleteEmbed,
   buildSetupPanel,
+  commandIdMap,
   chooseSetupChannel,
+  formatCommandMentions,
   handleSetupPanelInteraction,
   isUsableSetupChannel,
   postSetupPanels,
+  resolveCommandIds,
+  resolveSelectedChannel,
 };

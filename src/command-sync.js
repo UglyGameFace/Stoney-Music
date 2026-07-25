@@ -9,6 +9,14 @@ function commandNames(commands) {
     .sort();
 }
 
+function commandIdMap(commands) {
+  return Object.fromEntries(
+    commands
+      .filter((command) => command?.id && command?.name)
+      .map((command) => [String(command.name), String(command.id)])
+  );
+}
+
 function connectedGuildSummary(guilds) {
   const cached = [...(guilds?.cache?.values?.() || [])];
   if (!cached.length) return "none";
@@ -89,7 +97,12 @@ async function syncApplicationCommands({
       `✅ Discord accepted ${actualNames.length} guild commands for ${targetGuild.name} (${targetGuild.id}): ` +
         actualNames.map((name) => `/${name}`).join(", ")
     );
-    return { scope: "guild", guildId: targetGuild.id, commandNames: actualNames };
+    return {
+      scope: "guild",
+      guildId: targetGuild.id,
+      commandNames: actualNames,
+      commandIds: commandIdMap(registered),
+    };
   }
 
   logger.warn?.(
@@ -101,10 +114,16 @@ async function syncApplicationCommands({
     `✅ Discord accepted ${actualNames.length} global commands: ` +
       actualNames.map((name) => `/${name}`).join(", ")
   );
-  return { scope: "global", guildId: null, commandNames: actualNames };
+  return {
+    scope: "global",
+    guildId: null,
+    commandNames: actualNames,
+    commandIds: commandIdMap(registered),
+  };
 }
 
 module.exports = {
+  commandIdMap,
   commandNames,
   connectedGuildSummary,
   syncApplicationCommands,
