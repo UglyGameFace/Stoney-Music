@@ -1,28 +1,13 @@
 "use strict";
 
-const fs = require("fs");
-const path = require("path");
-const dotenv = require("dotenv");
+const { loadEnvironment } = require("./env");
 
-function tryLoadDotenv(filePath) {
-  try {
-    if (!filePath || !fs.existsSync(filePath)) return false;
-    dotenv.config({ path: filePath, override: false, quiet: true });
-    console.log(`✅ Loaded environment file: ${filePath}`);
-    return true;
-  } catch (error) {
-    console.warn(`⚠️ Could not load environment file ${filePath}:`, error?.message || error);
-    return false;
-  }
-}
-
-tryLoadDotenv(path.join(process.cwd(), ".env"));
-tryLoadDotenv("/home/user_discloud/.env");
-tryLoadDotenv("/home/node/.env");
+loadEnvironment();
 
 const {
   Client,
   EmbedBuilder,
+  Events,
   GatewayIntentBits,
   MessageFlags,
   Partials,
@@ -117,7 +102,7 @@ const client = new Client({
 
 let players = null;
 
-client.once("ready", async () => {
+client.once(Events.ClientReady, async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   players = new PlayerManager({ nodes, discordClient: client });
 

@@ -38,15 +38,17 @@ function canConnect(port) {
   });
 }
 
-test("start.sh supervises the actual Java process and cleans it up when Node exits", { timeout: 15_000 }, async (t) => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stoney-start-test-"));
+test("JavaScript MAIN bootstrap waits for Lavalink and cleans it up when the bot exits", { timeout: 20_000 }, async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stoney-bootstrap-test-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
 
-  fs.copyFileSync(path.join(root, "start.sh"), path.join(directory, "start.sh"));
-  fs.copyFileSync(path.join(root, "application.yml"), path.join(directory, "application.yml"));
-  fs.writeFileSync(path.join(directory, "lavalink.jar"), "");
-  fs.truncateSync(path.join(directory, "lavalink.jar"), 50_000_000);
+  const jarPath = path.join(directory, "lavalink.jar");
+  fs.writeFileSync(jarPath, "");
+  fs.truncateSync(jarPath, 50_000_000);
   fs.writeFileSync(path.join(directory, ".lavalink-version"), "4.2.2\n");
+
+  const botEntry = path.join(directory, "fake-bot.js");
+  fs.writeFileSync(botEntry, "setTimeout(() => process.exit(7), 250);\n");
 
   const fakeBin = path.join(directory, "fake-bin");
   fs.mkdirSync(fakeBin);
@@ -54,16 +56,11 @@ test("start.sh supervises the actual Java process and cleans it up when Node exi
     path.join(fakeBin, "java"),
     `#!/usr/bin/env bash\nif [ "\${1:-}" = "-version" ]; then\n  echo 'openjdk version "21.0.1"' >&2\n  exit 0\nfi\nexec /usr/bin/python3 -c 'import os,socket,time; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("127.0.0.1",int(os.environ["LAVALINK_PORT"]))); s.listen(); time.sleep(30)'\n`
   );
-  fs.writeFileSync(
-    path.join(fakeBin, "node"),
-    "#!/usr/bin/env bash\nsleep 0.25\nexit 7\n"
-  );
   fs.chmodSync(path.join(fakeBin, "java"), 0o755);
-  fs.chmodSync(path.join(fakeBin, "node"), 0o755);
 
   const port = await getFreePort();
-  const child = spawn("bash", ["start.sh"], {
-    cwd: directory,
+  const child = spawn(process.execPath, [path.join(root, "src", "bootstrap.js")], {
+    cwd: root,
     env: {
       ...process.env,
       PATH: `${fakeBin}:${process.env.PATH}`,
@@ -72,7 +69,10 @@ test("start.sh supervises the actual Java process and cleans it up when Node exi
       LAVALINK_PASSWORD: "test-password-not-real",
       LAVALINK_HOST: "127.0.0.1",
       LAVALINK_PORT: String(port),
+      LAVALINK_JAR: jarPath,
       LAVALINK_WAIT_TIMEOUT: "6",
+      STONEY_BOT_ENTRY: botEntry,
+      STONEY_ENV_LOADED: "1",
     },
   });
 
@@ -86,11 +86,68 @@ test("start.sh supervises the actual Java process and cleans it up when Node exi
   });
 
   assert.equal(exitCode, 7, output);
-  assert.match(output, /Lavalink port is open/);
+  assert.match(output, /Lavalink is accepting connections/);
   assert.match(output, /Starting Stoney Music bot/);
   assert.match(output, /Discord bot stopped unexpectedly/);
-  assert.match(output, /Stopping Stoney Music services/);
 
   await new Promise((resolve) => setTimeout(resolve, 150));
   assert.equal(await canConnect(port), false, "fake Lavalink process should be terminated");
+});
+
+test("start.sh delegates to the same JavaScript bootstrap used by Discloud", () => {
+  const start = fs.readFileSync(path.join(root, "start.sh"), "utf8");
+  assert.match(start, /exec node src\/bootstrap\.js/);
+  assert.doesNotMatch(start, /java .*Lavalink|wait -n/);
+});
+
+test("bootstrap cleans up Lavalink when readiness times out", { timeout: 10_000 }, async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stoney-bootstrap-timeout-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+  const jarPath = path.join(directory, "lavalink.jar");
+  fs.writeFileSync(jarPath, "");
+  fs.truncateSync(jarPath, 50_000_000);
+  fs.writeFileSync(path.join(directory, ".lavalink-version"), "4.2.2\n");
+
+  const pidFile = path.join(directory, "java.pid");
+  const fakeBin = path.join(directory, "fake-bin");
+  fs.mkdirSync(fakeBin);
+  fs.writeFileSync(
+    path.join(fakeBin, "java"),
+    `#!/usr/bin/env bash\nif [ "\${1:-}" = "-version" ]; then\n  echo 'openjdk version "21.0.1"' >&2\n  exit 0\nfi\necho $$ > "$PID_FILE"\nexec sleep 30\n`
+  );
+  fs.chmodSync(path.join(fakeBin, "java"), 0o755);
+
+  const port = await getFreePort();
+  const child = spawn(process.execPath, [path.join(root, "src", "bootstrap.js")], {
+    cwd: root,
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      PID_FILE: pidFile,
+      DISCORD_TOKEN: "test-token-not-real",
+      MUSIC_TEXT_CHANNEL_ID: "123456789012345678",
+      LAVALINK_PASSWORD: "test-password-not-real",
+      LAVALINK_HOST: "127.0.0.1",
+      LAVALINK_PORT: String(port),
+      LAVALINK_JAR: jarPath,
+      LAVALINK_WAIT_TIMEOUT: "1",
+      STONEY_ENV_LOADED: "1",
+    },
+  });
+
+  let output = "";
+  child.stdout.on("data", (chunk) => (output += chunk));
+  child.stderr.on("data", (chunk) => (output += chunk));
+  const exitCode = await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", resolve);
+  });
+
+  assert.equal(exitCode, 1, output);
+  assert.match(output, /Timed out after 1s waiting for Lavalink/);
+  assert.match(output, /Stopping partially started Stoney Music services/);
+
+  const javaPid = Number.parseInt(fs.readFileSync(pidFile, "utf8"), 10);
+  assert.throws(() => process.kill(javaPid, 0), { code: "ESRCH" });
 });
