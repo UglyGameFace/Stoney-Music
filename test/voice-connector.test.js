@@ -44,6 +44,43 @@ function createHarness() {
   return { connector, connection, events, guildId, logs };
 }
 
+function startupHarness({ ready }) {
+  const handlers = new Map();
+  const addedNodes = [];
+  const logs = [];
+  const client = {
+    isReady: () => ready,
+    once(event, handler) {
+      handlers.set(`once:${event}`, handler);
+    },
+    on(event, handler) {
+      handlers.set(`on:${event}`, handler);
+    },
+    user: { id: "bot-user" },
+    ws: { shards: new Map() },
+  };
+  const manager = {
+    id: null,
+    connections: new Map(),
+    addNode(node) {
+      addedNodes.push(node);
+    },
+  };
+  const connector = new StableDiscordJSConnector(client, {
+    logger: {
+      log: (message) => logs.push(message),
+      warn: (message) => logs.push(message),
+    },
+  });
+  connector.set(manager);
+
+  return { addedNodes, client, connector, handlers, logs, manager };
+}
+
+function nodeOptions() {
+  return [{ name: "main", url: "127.0.0.1:2333", auth: "password", secure: false }];
+}
+
 function statePacket(guildId, overrides = {}) {
   return {
     t: VOICE_STATE_UPDATE,
@@ -70,6 +107,33 @@ function serverPacket(guildId, overrides = {}) {
     },
   };
 }
+
+test("connector initializes immediately when Discord clientReady already fired", () => {
+  const { addedNodes, connector, handlers, logs, manager } = startupHarness({ ready: true });
+
+  connector.listen(nodeOptions());
+
+  assert.equal(manager.id, "bot-user");
+  assert.equal(addedNodes.length, 1);
+  assert.equal(typeof handlers.get("on:raw"), "function");
+  assert.equal(handlers.has("once:clientReady"), false);
+  assert.match(logs.join("\n"), /already-ready Discord client/);
+});
+
+test("connector waits for clientReady when Discord is not ready yet", () => {
+  const { addedNodes, connector, handlers, manager } = startupHarness({ ready: false });
+
+  connector.listen(nodeOptions());
+
+  assert.equal(manager.id, null);
+  assert.equal(addedNodes.length, 0);
+  assert.equal(typeof handlers.get("on:raw"), "function");
+  assert.equal(typeof handlers.get("once:clientReady"), "function");
+
+  handlers.get("once:clientReady")();
+  assert.equal(manager.id, "bot-user");
+  assert.equal(addedNodes.length, 1);
+});
 
 test("server-first Discord voice packets are buffered until the session ID arrives", () => {
   const { connector, events, guildId, logs } = createHarness();
