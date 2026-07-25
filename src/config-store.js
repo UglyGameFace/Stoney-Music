@@ -25,6 +25,7 @@ function normalizeGuildConfig(value = {}, defaults = {}) {
     roleResident: configuredValue(value, defaults, "roleResident"),
     setupPanelChannelId: configuredValue(value, defaults, "setupPanelChannelId"),
     setupPanelMessageId: configuredValue(value, defaults, "setupPanelMessageId"),
+    setupPanelVersion: configuredValue(value, defaults, "setupPanelVersion"),
   };
 }
 
@@ -32,7 +33,8 @@ class GuildConfigStore {
   constructor({ filePath = process.env.MUSIC_CONFIG_PATH || DEFAULT_CONFIG_PATH, defaults = {} } = {}) {
     this.filePath = path.resolve(filePath);
     this.defaults = normalizeGuildConfig(defaults);
-    // Channel selection is setup-managed. Ignore any leftover environment default from older deployments.
+    // Channel selection is always per-server and setup-managed. Old environment
+    // defaults are intentionally discarded during the public multi-server migration.
     this.defaults.musicTextChannelId = null;
     this.guilds = {};
     this.loaded = false;
@@ -85,7 +87,7 @@ class GuildConfigStore {
     await fsp.mkdir(directory, { recursive: true });
     await fsp.writeFile(
       temporary,
-      `${JSON.stringify({ version: 1, guilds: this.guilds }, null, 2)}\n`,
+      `${JSON.stringify({ version: 2, guilds: this.guilds }, null, 2)}\n`,
       { mode: 0o600 }
     );
     await fsp.rename(temporary, this.filePath);
