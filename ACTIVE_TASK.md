@@ -46,26 +46,27 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - discord.js 14.26.4 manifest confirms Node >=18; the configured Node 22 line is compatible.
 - Shoukaku source confirms the runtime APIs used by the bot: `getIdealNode`, `joinVoiceChannel`, `rest.resolve`, `playTrack`, `stopTrack`, `setGlobalVolume`, and `setFilters`.
 - GitHub Actions run `30146935379`: passed with `npm ci`, 31/31 tests, real Discord.js/Shoukaku imports, and committed-secret/runtime-file checks.
-- Bootstrap repair GitHub Actions run `30147546280`: passed on head `d52d16dd0365ff7879f3cb989017f29029fdaacc` with locked `npm ci`, 35/35 tests, runtime imports, and secret/runtime-file checks.
-- This status update is the only change after that run; the exact final PR head must pass the same workflow before merge.
+- Bootstrap repair GitHub Actions run `30147546280`: passed on the implementation head with locked `npm ci`, 35/35 tests, runtime imports, and secret/runtime-file checks.
+- Exact final PR-head GitHub Actions run `30147578549`: passed with locked `npm ci`, 35/35 tests, runtime imports, and secret/runtime-file checks.
+- Squash merge tree committed to `main` as `9a964fe88d09a997c55cbee9ef691280222f0172`.
 
 ## Cleanup status
 - Original backup remains untouched.
 - Published tree contains no `.env`, live token, Lavalink JAR, plugins, logs, caches, `node_modules`, or deployment archives.
 - Stale Lavalink/LavaSrc configuration and duplicate/obsolete resolver behavior were removed rather than retained as compatibility patches.
 - Validation PRs #1 and #2 were closed without merge; their trigger files never entered `main`.
+- Startup repair PR #3 was squash-merged after its exact final head passed GitHub Actions.
 
 ## Publication status
-- Sanitized source published to `UglyGameFace/Stoney-Music` on `main`.
-- Final validated code/config head before this status-only update: `bc3ace53e3d8e830078c273c5c89dedbe89587b0`.
-- Deterministic dependency lock committed at `66eed491ec33b0382b7ad16148ddcba33fccf37b`.
-- Bootstrap repair is staged and CI-validated in PR #3 from `fix/discloud-lavalink-bootstrap`.
+- Sanitized source is published to `UglyGameFace/Stoney-Music` on `main`.
+- Deterministic dependency lock is committed.
+- Discloud startup repair is merged on `main` at `9a964fe88d09a997c55cbee9ef691280222f0172`.
 - The repository is currently public. No secrets were published, but the originally intended visibility was private.
 
 ## Remaining external gates
 - Change repository visibility to private if the source should not remain public; the connected GitHub integration cannot change visibility.
-- Merge PR #3 after the exact final head passes GitHub Actions, then redeploy it while preserving the required environment variables.
-- Run a controlled live smoke test for text search, direct YouTube playback, YouTube playlists, Apple Music song/album matching, Spotify track/mobile-link matching, skip/loop behavior, failure recovery, and process cleanup.
+- Redeploy the current `main` tree to Discloud while preserving the required environment variables.
+- Confirm the healthy bootstrap log order and run controlled live tests for text search, direct YouTube playback, YouTube playlists, Apple Music song/album matching, Spotify track/mobile-link matching, skip/loop behavior, failure recovery, and process cleanup.
 
 ## Backlog
 - Full Spotify album/playlist expansion after valid Spotify application credentials become available.
