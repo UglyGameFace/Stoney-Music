@@ -77,11 +77,9 @@ test("autoplay uses ListenBrainz radio and never repeats the requested track", a
   const seed = queueTrack("Seed Song", "Seed Artist");
   const requestedUrls = [];
   const fetchImpl = async (url) => {
-    requestedUrls.push(String(url));
-    if (String(url).includes("/artist/")) {
-      return jsonResponse({ artists: [{ id: "artist-mbid", name: "Seed Artist", score: 100 }] });
-    }
-    if (String(url).includes("/lb-radio/artist/")) {
+    const parsed = new URL(String(url));
+    requestedUrls.push(parsed.toString());
+    if (parsed.hostname === "api.listenbrainz.org" && parsed.pathname.includes("/lb-radio/artist/")) {
       return jsonResponse({
         radio: [
           {
@@ -97,7 +95,10 @@ test("autoplay uses ListenBrainz radio and never repeats the requested track", a
         ],
       });
     }
-    if (String(url).includes("/recording/")) {
+    if (parsed.hostname === "musicbrainz.org" && parsed.pathname.includes("/artist/")) {
+      return jsonResponse({ artists: [{ id: "artist-mbid", name: "Seed Artist", score: 100 }] });
+    }
+    if (parsed.hostname === "musicbrainz.org" && parsed.pathname.includes("/recording/")) {
       return jsonResponse({
         recordings: [
           {
