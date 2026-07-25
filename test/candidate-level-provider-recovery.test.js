@@ -69,6 +69,12 @@ test("a failed upload does not blacklist its entire provider", async () => {
     get: () => null,
     deadKeys: () => [],
   };
+  manager.providerHealthReady = Promise.resolve();
+  manager.providerHealth = {
+    isBlocked: () => false,
+  };
+  manager._providerSkipLoggedUntil = new Map();
+  manager.logger = { warn() {} };
   manager.resolve = async (identifier) => {
     calls.push(identifier);
     return {
