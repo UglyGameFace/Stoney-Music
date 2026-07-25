@@ -40,7 +40,7 @@ for (const retired of ["ANDROID_TESTSUITE", "TVHTML5EMBEDDED", "WEB_EMBEDDED"]) 
 
 const jarPath = path.join(root, "lavalink.jar");
 if (!fs.existsSync(jarPath)) {
-  console.log("ℹ️ lavalink.jar is not bundled; start.sh will download pinned Lavalink 4.2.2.");
+  console.log("ℹ️ lavalink.jar is not bundled; the JavaScript bootstrap will download pinned Lavalink 4.2.2.");
 } else {
   const unzip = spawnSync("unzip", ["-p", jarPath, "META-INF/MANIFEST.MF"], {
     encoding: "utf8",
