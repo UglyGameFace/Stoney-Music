@@ -143,7 +143,7 @@ test("PlayerManager opens the YouTube circuit only for the host-wide challenge s
       return Date.now() + 21_600_000;
     },
   };
-  manager._providerSkipLoggedUntil = new Map(["youtube", 1]);
+  manager._providerSkipLoggedUntil = new Map([["youtube", 1]]);
   manager.logger = { warn() {} };
 
   assert.equal(
