@@ -31,6 +31,14 @@ A locked-down, single-server Discord music bot using Discord.js, Shoukaku, and L
 
 Apple Music and Spotify links do not stream protected audio from those services. They supply metadata used to find a playable equivalent through the configured Lavalink providers.
 
+## First-time server setup
+
+After installing the app to the server with both `bot` and `applications.commands`, restart the bot. On a one-server deployment, Stoney Music automatically registers guild commands even when `GUILD_ID` is omitted.
+
+Run `/setup` as a server admin. It defaults the music command channel to the channel where the command is used and auto-detects `Verified` and `Resident` roles when those roles exist. Optional channel and role selections can be supplied directly in the command. The saved setup is reused after restarts.
+
+The bot must appear under **Server Settings → Integrations → Bots and Apps** before any slash command can appear.
+
 ## Environment setup
 
 Copy `.env.example` to `.env` for local use, or configure the same variables in Discloud. Never commit `.env`.
@@ -38,19 +46,20 @@ Copy `.env.example` to `.env` for local use, or configure the same variables in 
 Required:
 
 - `DISCORD_TOKEN`
-- `MUSIC_TEXT_CHANNEL_ID`
 - `LAVALINK_PASSWORD` — use a long random value
 
-Recommended:
+Optional:
 
-- `GUILD_ID` — exact server ID for immediate, server-scoped command registration
+- `GUILD_ID` — the bot auto-detects its server when connected to exactly one
+- `MUSIC_TEXT_CHANNEL_ID` — legacy/default channel; `/setup` replaces it with the saved selection
 - `ROLE_VERIFIED` — defaults to `Verified`
 - `ROLE_RESIDENT` — defaults to `Resident`
 
 ## Slash commands
 
-The bot uses generic command names, not a `/stoney` parent command:
+The bot registers `/setup` plus the music commands:
 
+- `/setup` — admin-only first-time configuration
 - `/play`
 - `/skip`
 - `/stop`
@@ -63,11 +72,11 @@ The bot uses generic command names, not a `/stoney` parent command:
 For the fastest and clearest registration, set `GUILD_ID` to the exact server where the bot is installed. A healthy startup logs the target server and the full accepted command list:
 
 ```text
-🧭 Registering 8 guild commands for Server Name (SERVER_ID)...
-✅ Discord accepted 8 guild commands for Server Name (SERVER_ID): /filter, /loop, /nowplaying, /play, /queue, /skip, /stop, /volume
+🧭 Registering 9 guild commands for Server Name (SERVER_ID)...
+✅ Discord accepted 9 guild commands for Server Name (SERVER_ID): /filter, /loop, /nowplaying, /play, /queue, /setup, /skip, /stop, /volume
 ```
 
-A wrong `GUILD_ID` now fails loudly and lists the servers the bot is actually connected to. If `GUILD_ID` is omitted, the bot warns that it is registering global commands instead.
+On a one-server deployment, a missing or stale `GUILD_ID` is recovered automatically from the connected server. Multi-server deployments still require an exact `GUILD_ID` for immediate guild commands.
 
 Local Lavalink defaults:
 
