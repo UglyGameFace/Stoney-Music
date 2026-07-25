@@ -19,9 +19,9 @@ const { buildCommands } = require("./commands");
 const { syncApplicationCommands } = require("./command-sync");
 const { GuildConfigStore } = require("./config-store");
 const { enforceGuards } = require("./guards");
+const { safeTrackDescription } = require("./format");
 const { PlayerManager } = require("./player");
 const { MusicResolutionError, toQueueTrack } = require("./resolver");
-const { safeTrackDescription } = require("./format");
 const { handleSetupPanelInteraction, postSetupPanels } = require("./setup-panel");
 
 function missingKeys(keys) {
@@ -68,14 +68,22 @@ async function sendSetupPanelError(interaction) {
   else await interaction.reply(payload);
 }
 
+function autoplayLabel(guildPlayer) {
+  return guildPlayer.autoplayStatus() ? "♾️ Autoplay: On" : "♾️ Autoplay: Off";
+}
+
+function trackOriginLabel(track) {
+  if (!track?.autoplay) return null;
+  const seed = [track.autoplaySeedAuthor, track.autoplaySeedTitle].filter(Boolean).join(" — ");
+  return seed ? `Recommended from ${seed}` : "Autoplay recommendation";
+}
+
 const cfg = {
   token: process.env.DISCORD_TOKEN,
-  guildId: process.env.GUILD_ID || null,
 };
 
 const configStore = new GuildConfigStore({
   defaults: {
-    musicTextChannelId: process.env.MUSIC_TEXT_CHANNEL_ID || null,
     roleVerifiedId: null,
     roleVerified: null,
     roleResidentId: null,
@@ -135,8 +143,6 @@ client.once(Events.ClientReady, async () => {
     await syncApplicationCommands({
       rest,
       applicationId,
-      guildId: cfg.guildId,
-      guilds: client.guilds,
       commands,
       logger: console,
     });
@@ -145,7 +151,6 @@ client.once(Events.ClientReady, async () => {
       code: error?.code,
       status: error?.status,
       message: error?.message || String(error),
-      guildId: cfg.guildId,
       applicationId,
     });
   }
@@ -304,6 +309,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const embed = new EmbedBuilder()
         .setTitle(title)
         .setDescription(`${safeTrackDescription(first)}${countText}`)
+        .addFields({ name: "Station", value: autoplayLabel(guildPlayer), inline: true })
         .setFooter({ text: `${sourceText} • Requested by ${interaction.user.username}` });
 
       if (first?.artworkUrl) embed.setThumbnail(first.artworkUrl);
@@ -315,7 +321,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    const controlsPlayback = ["skip", "stop", "volume", "loop", "filter"].includes(
+    const controlsPlayback = ["skip", "stop", "autoplay", "volume", "loop", "filter"].includes(
       interaction.commandName
     );
     if (controlsPlayback && guildPlayer.isConnected()) {
@@ -336,7 +342,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.commandName === "stop") {
       await guildPlayer.stopAndClear();
-      await interaction.reply("⏹️ Stopped and cleared the queue.");
+      await interaction.reply("⏹️ Stopped, cleared the queue, and disabled autoplay.");
       return;
     }
 
@@ -346,13 +352,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const lines = [];
 
       lines.push(now ? `**Now:** ${safeTrackDescription(now)}` : "**Now:** Nothing playing");
+      lines.push(`**${autoplayLabel(guildPlayer)}**`);
+      const origin = trackOriginLabel(now);
+      if (origin) lines.push(`_${origin}_`);
       if (upcoming.length) {
         lines.push("\n**Up Next:**");
         upcoming.forEach((track, index) => lines.push(`${index + 1}. ${safeTrackDescription(track)}`));
         const hidden = guildPlayer.queueLength() - upcoming.length;
         if (hidden > 0) lines.push(`…and ${hidden} more.`);
       } else {
-        lines.push("\nNo upcoming tracks.");
+        lines.push(
+          guildPlayer.autoplayStatus()
+            ? "\nNo human-requested tracks are queued. Autoplay will choose related music."
+            : "\nNo upcoming tracks."
+        );
       }
 
       await interaction.reply({ content: lines.join("\n") });
@@ -365,7 +378,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.reply({ content: "Nothing is playing.", flags: MessageFlags.Ephemeral });
         return;
       }
-      await interaction.reply(`🎶 **Now Playing:** ${safeTrackDescription(now)}`);
+      const origin = trackOriginLabel(now);
+      await interaction.reply(
+        [
+          `🎶 **Now Playing:** ${safeTrackDescription(now)}`,
+          `**${autoplayLabel(guildPlayer)}**`,
+          origin ? `_${origin}_` : null,
+        ]
+          .filter(Boolean)
+          .join("\n")
+      );
+      return;
+    }
+
+    if (interaction.commandName === "autoplay") {
+      const enabled = interaction.options.getString("mode", true) === "on";
+      if (enabled && !guildPlayer.nowPlaying()) {
+        await interaction.reply({
+          content: "Start a song first so autoplay has a real song and artist to build the station from.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      const active = await guildPlayer.setAutoplay(enabled);
+      await interaction.reply(
+        active
+          ? "♾️ **Autoplay is on.** When the human queue ends, Stoney will continue with related music based on the latest song somebody requested."
+          : "♾️ **Autoplay is off.** Playback will stop when the human queue ends."
+      );
       return;
     }
 
@@ -387,6 +427,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const preset = interaction.options.getString("preset", true);
       await guildPlayer.setFilterPreset(preset);
       await interaction.reply(`✨ Filter: **${preset}**.`);
+      return;
     }
   } catch (error) {
     console.error("Music command failed", {
