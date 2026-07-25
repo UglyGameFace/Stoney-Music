@@ -173,8 +173,10 @@ function titleCore(value, artist = "") {
 }
 
 function markerSet(value) {
-  const normalized = normalizeText(value);
-  return new Set(VERSION_MARKERS.filter((marker) => normalized.includes(normalizeText(marker))));
+  const padded = ` ${normalizeText(value)} `;
+  return new Set(
+    VERSION_MARKERS.filter((marker) => padded.includes(` ${normalizeText(marker)} `))
+  );
 }
 
 function unexpectedVersionMarkers(originalTitle, candidateTitle) {
