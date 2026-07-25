@@ -10,9 +10,11 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - Apple Music was disabled. Enabling LavaSrc without Apple credentials would not repair it; Apple is a metadata mirror rather than a direct protected-audio source.
 - Spotify was configured as though credentials/token infrastructure existed when it did not.
 - Track-end reasons were ignored, allowing manual skip to replay under track-loop and allowing failure/end races to double-advance.
-- The old shell pipeline tracked `tee` instead of Java and `exec node` bypassed cleanup.
+- The original shell pipeline tracked `tee` instead of Java and `exec node` bypassed cleanup.
 - The backup contained a live `.env` and an obsolete generated Lavalink JAR; neither belongs in Git history.
 - The first GitHub run exposed a publish-audit false positive: it inspected the working tree after installation and treated untracked `node_modules/` as committed content.
+- The first live Discloud boot launched `src/index.js` as PID 1 and never executed `start.sh`; therefore Lavalink was never started and Shoukaku received `ECONNREFUSED 127.0.0.1:2333`.
+- The Discord entrypoint loaded the same `/home/node/.env` twice through duplicate candidate paths and still used the deprecated `ready` event name.
 
 ## Implemented changes
 - Added one canonical resolver with correct Lavalink v4 parsing and bounded `ytsearch` → `ytmsearch` → `scsearch` fallback.
@@ -27,13 +29,16 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - Changed the publish audit to inspect Git-tracked files, ignoring installed-but-untracked dependencies while still rejecting committed dependencies, environment files, JARs, logs, backups, archives, tokens, and private keys.
 - Generated and committed a lockfile from GitHub's real npm installation.
 - Changed GitHub CI and Discloud builds to deterministic `npm ci` installs.
+- Replaced the deployment entrypoint with `src/bootstrap.js` and set it as Discloud `MAIN`, npm start, and the `start.sh` delegate, so Java/Lavalink startup cannot be bypassed by Discloud choosing the main file directly.
+- Added one idempotent environment loader and migrated Discord startup to `Events.ClientReady`.
+- Added readiness timeout and partial-startup cleanup coverage, including termination of Lavalink when the bot exits or readiness never succeeds.
 
 ## Validation status
-- JavaScript syntax check: passed for 16 files.
+- JavaScript syntax check: passed for 19 files.
 - Bash syntax check: passed.
 - `application.yml`: parsed and semantically checked.
-- Local regression/integration suite: 31/31 passed after the final lockfile and audit changes.
-- Process-supervision integration test: passed and confirmed Lavalink cleanup after Node exit.
+- Local regression/integration suite: 35/35 passed after the Discloud bootstrap repair.
+- Process-supervision integration tests: passed and confirmed Lavalink cleanup after bot exit and after readiness timeout.
 - Exact-value scan against live secrets from the original backup: passed with no matches.
 - Generic Discord/GitHub token and private-key pattern scan: passed.
 - Duplicate/conflict inspection: one resolver, one guild-player class, one player manager, and one interaction owner.
@@ -56,7 +61,7 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 
 ## Remaining external gates
 - Change repository visibility to private if the source should not remain public; the connected GitHub integration cannot change visibility.
-- Deploy the current `main` tree to Discloud with the required environment variables.
+- Deploy the bootstrap repair after its exact GitHub Actions run passes, preserving the required environment variables.
 - Run a controlled live smoke test for text search, direct YouTube playback, YouTube playlists, Apple Music song/album matching, Spotify track/mobile-link matching, skip/loop behavior, failure recovery, and process cleanup.
 
 ## Backlog
