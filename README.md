@@ -43,9 +43,31 @@ Required:
 
 Recommended:
 
-- `GUILD_ID` — registers command updates immediately in the target server
+- `GUILD_ID` — exact server ID for immediate, server-scoped command registration
 - `ROLE_VERIFIED` — defaults to `Verified`
 - `ROLE_RESIDENT` — defaults to `Resident`
+
+## Slash commands
+
+The bot uses generic command names, not a `/stoney` parent command:
+
+- `/play`
+- `/skip`
+- `/stop`
+- `/queue`
+- `/nowplaying`
+- `/volume`
+- `/loop`
+- `/filter`
+
+For the fastest and clearest registration, set `GUILD_ID` to the exact server where the bot is installed. A healthy startup logs the target server and the full accepted command list:
+
+```text
+🧭 Registering 8 guild commands for Server Name (SERVER_ID)...
+✅ Discord accepted 8 guild commands for Server Name (SERVER_ID): /filter, /loop, /nowplaying, /play, /queue, /skip, /stop, /volume
+```
+
+A wrong `GUILD_ID` now fails loudly and lists the servers the bot is actually connected to. If `GUILD_ID` is omitted, the bot warns that it is registering global commands instead.
 
 Local Lavalink defaults:
 
