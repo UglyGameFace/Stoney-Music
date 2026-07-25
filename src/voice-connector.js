@@ -12,6 +12,23 @@ class StableDiscordJSConnector extends Connectors.DiscordJS {
     this.pendingServerUpdates = new Map();
   }
 
+  listen(nodes) {
+    this.client.on("raw", (packet) => this.raw(packet));
+
+    const initialize = () => {
+      if (this.manager?.id) return;
+      this.ready(nodes);
+    };
+
+    if (this.client.isReady?.()) {
+      initialize();
+      this.logger.log?.("🎛️ Shoukaku initialized from the already-ready Discord client.");
+      return;
+    }
+
+    this.client.once("clientReady", initialize);
+  }
+
   raw(packet) {
     if (!packet || ![VOICE_STATE_UPDATE, VOICE_SERVER_UPDATE].includes(packet.t)) return;
 
