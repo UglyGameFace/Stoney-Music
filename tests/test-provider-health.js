@@ -61,7 +61,7 @@ test("provider identifier detection includes searches and direct links", () => {
 test("provider health persists per Lavalink node and expires after cooldown", async (t) => {
   const { directory, filePath } = await temporaryHealthPath();
   t.after(() => fsp.rm(directory, { recursive: true, force: true }));
-  const now = 1_000_000;
+  const now = Date.now();
   const localNode = normalizeNodeKey([{ name: "main", url: "127.0.0.1:2333", secure: false }]);
   const remoteNode = normalizeNodeKey([{ name: "main", url: "music.example.com:443", secure: true }]);
 
