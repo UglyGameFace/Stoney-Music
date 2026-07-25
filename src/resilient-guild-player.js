@@ -4,6 +4,8 @@ const { GuildPlayer } = require("./guild-player");
 const { playbackCandidateKey } = require("./playback-fallback");
 
 const MAX_RUNTIME_FALLBACK_ATTEMPTS = 8;
+const DEFAULT_PLAYBACK_START_TIMEOUT_MS = 12_000;
+const PLAYBACK_ENGINE_BUILD = "resilient-v3-start-watchdog";
 
 function uniqueKeys(values) {
   return [...new Set((values || []).filter(Boolean).map(String))];
@@ -19,13 +21,20 @@ class ResilientGuildPlayer extends GuildPlayer {
       resolveAutoplay = null,
       onFallbackVerified = null,
       onFallbackFailed = null,
+      playbackStartTimeoutMs = DEFAULT_PLAYBACK_START_TIMEOUT_MS,
     } = {}
   ) {
     super(shoukaku, guildId, { logger, resolveFallback, resolveAutoplay });
     this.onFallbackVerified =
       typeof onFallbackVerified === "function" ? onFallbackVerified : null;
     this.onFallbackFailed = typeof onFallbackFailed === "function" ? onFallbackFailed : null;
+    this.playbackStartTimeoutMs = Math.max(
+      10,
+      Number(playbackStartTimeoutMs) || DEFAULT_PLAYBACK_START_TIMEOUT_MS
+    );
     this._fallbackBoundPlayer = null;
+    this._playbackStartRevision = 0;
+    this._playbackStartState = null;
   }
 
   async connect(options) {
@@ -34,14 +43,99 @@ class ResilientGuildPlayer extends GuildPlayer {
     return player;
   }
 
+  _clearPlaybackStartWatchdog(encoded = null) {
+    const state = this._playbackStartState;
+    if (!state) return false;
+    if (encoded && state.encoded && encoded !== state.encoded) return false;
+    if (state.timer) clearTimeout(state.timer);
+    this._playbackStartState = null;
+    return true;
+  }
+
+  _schedulePlaybackStartWatchdog(track, revision) {
+    const pending = this._playbackStartState;
+    if (
+      !pending ||
+      pending.revision !== revision ||
+      pending.encoded !== track?.encoded ||
+      !this.player ||
+      this.current !== track
+    ) {
+      return;
+    }
+
+    const timeoutMs = this.playbackStartTimeoutMs;
+    const timer = setTimeout(() => {
+      const active = this._playbackStartState;
+      if (
+        !active ||
+        active.revision !== revision ||
+        active.encoded !== track.encoded ||
+        !this.player ||
+        this.current?.encoded !== track.encoded
+      ) {
+        return;
+      }
+
+      this._playbackStartState = null;
+      this.logger.warn?.("⏱️ Lavalink did not confirm playback start; forcing mirror recovery", {
+        guildId: this.guildId,
+        requestedTitle: track.title,
+        requestedArtist: track.author,
+        playbackTitle: track.playbackCandidateTitle || track.title,
+        playbackArtist: track.playbackCandidateAuthor || track.author,
+        source: track.sourceName,
+        timeoutMs,
+      });
+
+      this._handleTrackException({
+        track: { encoded: track.encoded },
+        exception: {
+          message: `Lavalink did not emit a track-start event within ${timeoutMs}ms.`,
+        },
+        watchdog: true,
+      }).catch((error) => {
+        this.logger.error?.("Playback start watchdog recovery failed", {
+          guildId: this.guildId,
+          message: error?.message || String(error),
+        });
+      });
+    }, timeoutMs);
+    timer.unref?.();
+    pending.timer = timer;
+  }
+
+  async _startTrack(track) {
+    this._clearPlaybackStartWatchdog();
+    const revision = ++this._playbackStartRevision;
+    this._playbackStartState = {
+      revision,
+      encoded: track?.encoded || null,
+      timer: null,
+    };
+
+    try {
+      const started = await super._startTrack(track);
+      this._schedulePlaybackStartWatchdog(track, revision);
+      return started;
+    } catch (error) {
+      const pending = this._playbackStartState;
+      if (pending?.revision === revision) this._clearPlaybackStartWatchdog();
+      throw error;
+    }
+  }
+
   _bindFallbackVerification(bound) {
     if (!bound || this._fallbackBoundPlayer === bound) return;
     this._fallbackBoundPlayer = bound;
 
     bound.on("start", (event = {}) => {
-      if (this.player !== bound || !this.current?.fallbackPending) return;
+      if (this.player !== bound || !this.current) return;
       const startedEncoded = event?.track?.encoded;
       if (startedEncoded && startedEncoded !== this.current.encoded) return;
+
+      this._clearPlaybackStartWatchdog(this.current.encoded);
+      if (!this.current.fallbackPending) return;
 
       const confirmed = this.current;
       confirmed.fallbackPending = false;
@@ -123,6 +217,7 @@ class ResilientGuildPlayer extends GuildPlayer {
         return this.current;
       }
 
+      this._clearPlaybackStartWatchdog(failedEncoded);
       const failed = this.current;
       const failureMessage = this._shortErrorMessage(event);
       this.logger.warn?.("⚠️ Playback source failed", {
@@ -133,6 +228,7 @@ class ResilientGuildPlayer extends GuildPlayer {
         playbackArtist: failed.playbackCandidateAuthor || failed.author,
         source: failed.sourceName,
         message: failureMessage,
+        watchdog: Boolean(event.watchdog),
       });
 
       if (failed.isFallback || failed.fallbackPending || failed.fallbackVerified) {
@@ -228,10 +324,32 @@ class ResilientGuildPlayer extends GuildPlayer {
       return this.current;
     });
   }
+
+  async _handleTrackEnd(event = {}) {
+    this._clearPlaybackStartWatchdog(event?.track?.encoded || null);
+    return super._handleTrackEnd(event);
+  }
+
+  async skip() {
+    this._clearPlaybackStartWatchdog(this.current?.encoded || null);
+    return super.skip();
+  }
+
+  async stopAndClear() {
+    this._clearPlaybackStartWatchdog();
+    return super.stopAndClear();
+  }
+
+  async disconnect() {
+    this._clearPlaybackStartWatchdog();
+    return super.disconnect();
+  }
 }
 
 module.exports = {
+  DEFAULT_PLAYBACK_START_TIMEOUT_MS,
   MAX_RUNTIME_FALLBACK_ATTEMPTS,
+  PLAYBACK_ENGINE_BUILD,
   ResilientGuildPlayer,
   uniqueKeys,
 };
