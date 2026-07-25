@@ -61,6 +61,17 @@ test("publishable tree does not contain a live environment file", () => {
   assert.equal(fs.existsSync(path.join(root, ".env")), false);
 });
 
+test("setup can initialize the bot without a preconfigured music channel", () => {
+  const commands = fs.readFileSync(path.join(root, "src", "commands.js"), "utf8");
+  const guards = fs.readFileSync(path.join(root, "src", "guards.js"), "utf8");
+  assert.match(commands, /setName\("setup"\)/);
+  assert.match(commands, /PermissionFlagsBits\.ManageGuild/);
+  assert.match(index, /interaction\.commandName === "setup"/);
+  assert.match(index, /missingKeys\(\["DISCORD_TOKEN"\]\)/);
+  assert.doesNotMatch(bootstrap, /missingKeys\(env, \["DISCORD_TOKEN", "MUSIC_TEXT_CHANNEL_ID"/);
+  assert.match(guards, /not configured yet.*`\/setup`/s);
+});
+
 test("runtime uses one canonical resolver and current dependency line", () => {
   const player = fs.readFileSync(path.join(root, "src", "player.js"), "utf8");
 
