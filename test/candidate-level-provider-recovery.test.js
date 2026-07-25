@@ -41,6 +41,7 @@ function lavalinkTrack({
   author = "MoneyBagg Yo",
   encoded = "alternate-youtube-encoded",
   identifier = "alternate-video",
+  uri = `https://example.test/${identifier}`,
   sourceName = "youtube",
   length = 185_000,
 } = {}) {
@@ -50,7 +51,7 @@ function lavalinkTrack({
       title,
       author,
       identifier,
-      uri: `https://example.test/${identifier}`,
+      uri,
       artworkUrl: "https://example.test/art.jpg",
       length,
       sourceName,
@@ -76,6 +77,7 @@ test("a failed upload does not blacklist its entire provider", async () => {
         lavalinkTrack({
           encoded: failed.encoded,
           identifier: failed.identifier,
+          uri: failed.uri,
         }),
         lavalinkTrack(),
       ],
