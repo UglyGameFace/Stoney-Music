@@ -71,7 +71,21 @@ class FakeShoukaku {
   }
 }
 
-async function connectedPlayer({ resolveFallback, onFallbackVerified, onFallbackFailed } = {}) {
+async function waitFor(predicate, { timeoutMs = 500, intervalMs = 5 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("Timed out waiting for condition.");
+}
+
+async function connectedPlayer({
+  resolveFallback,
+  onFallbackVerified,
+  onFallbackFailed,
+  playbackStartTimeoutMs = 1_000,
+} = {}) {
   const fake = new FakePlayer();
   const logs = [];
   const player = new PlaybackGuildPlayer(new FakeShoukaku(fake), "guild", {
@@ -83,7 +97,7 @@ async function connectedPlayer({ resolveFallback, onFallbackVerified, onFallback
     resolveFallback,
     onFallbackVerified,
     onFallbackFailed,
-    playbackStartTimeoutMs: 1_000,
+    playbackStartTimeoutMs,
   });
   await player.connect({ guildId: "guild", voiceChannelId: "voice", shardId: 0 });
   return { player, fake, logs };
@@ -128,6 +142,83 @@ test("a mirror is not confirmed until playback position advances", async () => {
   assert.equal(player.nowPlaying().fallbackVerified, true);
   assert.equal(player.nowPlaying().fallbackPending, false);
   assert.match(JSON.stringify(logs), /confirmed after stable audio/);
+});
+
+test("an initial source start event does not cancel recovery before audio progresses", async () => {
+  const original = track("Blocked YouTube", { encoded: "blocked-youtube" });
+  const mirror = track("Blocked YouTube", {
+    encoded: "working-mirror",
+    sourceName: "soundcloud",
+    isFallback: true,
+    fallbackScore: 0.99,
+  });
+  let searches = 0;
+  const { player, fake, logs } = await connectedPlayer({
+    playbackStartTimeoutMs: 25,
+    resolveFallback: async () => {
+      searches += 1;
+      return { candidates: [mirror], track: mirror, score: 0.99 };
+    },
+  });
+
+  player.enqueue(original);
+  await player.playNext();
+  fake.emit("start", { track: { encoded: original.encoded } });
+
+  await waitFor(() => fake.played.includes(mirror.encoded));
+  assert.equal(searches, 1);
+  assert.equal(player.nowPlaying().encoded, mirror.encoded);
+  assert.match(JSON.stringify(logs), /did not confirm playback start/);
+  assert.equal(player.snapshot().playbackStatus.phase, "recovering");
+});
+
+test("a healthy initial source clears the watchdog only after position advances", async () => {
+  const original = track("Healthy YouTube", { encoded: "healthy-youtube" });
+  let searches = 0;
+  const { player, fake, logs } = await connectedPlayer({
+    playbackStartTimeoutMs: 30,
+    resolveFallback: async () => {
+      searches += 1;
+      return { candidates: [] };
+    },
+  });
+
+  player.enqueue(original);
+  await player.playNext();
+  fake.emit("start", { track: { encoded: original.encoded } });
+  fake.position = MIN_STABLE_PLAYBACK_POSITION_MS + 50;
+  fake.emit("update", { position: fake.position });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  assert.equal(searches, 0);
+  assert.equal(player.nowPlaying().encoded, original.encoded);
+  assert.equal(player.snapshot().playbackStatus, null);
+  assert.match(JSON.stringify(logs), /Playback confirmed after audio position advanced/);
+});
+
+test("a premature finished event is treated as a startup failure instead of emptying the player", async () => {
+  const original = track("Premature Finish", { encoded: "premature-original" });
+  const mirror = track("Premature Finish", {
+    encoded: "premature-mirror",
+    sourceName: "soundcloud",
+    isFallback: true,
+  });
+  let searches = 0;
+  const { player, fake, logs } = await connectedPlayer({
+    resolveFallback: async () => {
+      searches += 1;
+      return { candidates: [mirror], track: mirror, score: 0.98 };
+    },
+  });
+
+  player.enqueue(original);
+  await player.playNext();
+  await player._handleTrackEnd({ reason: "finished", track: { encoded: original.encoded } });
+
+  assert.equal(searches, 1);
+  assert.equal(player.nowPlaying().encoded, mirror.encoded);
+  assert.deepEqual(fake.played, [original.encoded, mirror.encoded]);
+  assert.match(JSON.stringify(logs), /ended before stable audio/);
 });
 
 test("a mirror that starts then immediately 404s is never cached as good", async () => {
@@ -192,6 +283,7 @@ test("exception and loadFailed for the same attempt share one recovery owner", a
   const text = JSON.stringify(logs);
   assert.equal((text.match(/No strict playable mirror remained/g) || []).length, 1);
   assert.match(text, /Ignoring duplicate playback failure event/);
+  assert.equal(player.snapshot().playbackStatus.phase, "failed");
 });
 
 test("production uses supported search prefixes and filters SoundCloud previews", () => {
