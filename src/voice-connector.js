@@ -10,6 +10,27 @@ class StableDiscordJSConnector extends Connectors.DiscordJS {
     super(client);
     this.logger = logger;
     this.pendingServerUpdates = new Map();
+    this._readyStarted = false;
+  }
+
+  listen(nodes) {
+    const start = () => {
+      if (this._readyStarted) return;
+      this._readyStarted = true;
+      this.ready(nodes);
+      this.logger.log?.(
+        `🎚️ Shoukaku connector initialized for Discord user ${this.manager?.id || "unknown"}.`
+      );
+    };
+
+    this.client.on("raw", (packet) => this.raw(packet));
+
+    // PlayerManager is intentionally created inside Discord's ClientReady handler.
+    // The stock Shoukaku Discord.js connector waits for a future clientReady event,
+    // which will never arrive in that lifecycle. Start immediately when Discord is
+    // already ready, otherwise preserve the normal event-driven startup path.
+    if (this.client.isReady?.()) start();
+    else this.client.once("clientReady", start);
   }
 
   raw(packet) {
