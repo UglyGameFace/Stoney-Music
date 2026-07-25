@@ -7,7 +7,7 @@ const { spawnSync } = require("node:child_process");
 const root = path.resolve(__dirname, "..");
 const applicationPath = path.join(root, "application.yml");
 const application = fs.readFileSync(applicationPath, "utf8");
-const requiredEnv = ["DISCORD_TOKEN", "MUSIC_TEXT_CHANNEL_ID", "LAVALINK_PASSWORD"];
+const requiredEnv = ["DISCORD_TOKEN", "LAVALINK_PASSWORD"];
 let failed = false;
 
 function pass(message) {
