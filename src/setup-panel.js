@@ -12,30 +12,6 @@ const {
 
 const SETUP_BUTTON_ID = "stoney_music:setup_here";
 
-function normalizeRoleName(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "")
-    .trim();
-}
-
-function findConfiguredRole(guild, { id = null, name = null } = {}) {
-  if (id) {
-    const byId = guild.roles.cache.get(id);
-    if (byId) return byId;
-  }
-
-  const wanted = normalizeRoleName(name);
-  if (!wanted) return null;
-
-  const roles = [...guild.roles.cache.values()].filter((role) => !role.managed);
-  return (
-    roles.find((role) => normalizeRoleName(role.name) === wanted) ||
-    roles.find((role) => normalizeRoleName(role.name).includes(wanted)) ||
-    null
-  );
-}
-
 function isUsableSetupChannel(channel, guild) {
   if (!channel || !guild) return false;
   if (![ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type)) return false;
@@ -68,20 +44,20 @@ function buildSetupPanel() {
   const embed = new EmbedBuilder()
     .setTitle("🎵 Stoney Music Setup")
     .setDescription(
-      "Discord registered the slash commands, but the mobile command picker is not showing them. " +
-        "A server admin can use the button below to configure Stoney Music in this channel instead."
+      "Discord accepted the slash commands, but the mobile command picker is not displaying them. " +
+        "Use the button below to configure Stoney Music in this channel without relying on slash commands."
     )
     .addFields(
       {
         name: "What the button does",
-        value: "Sets this channel as the music channel and detects the configured Verified/Resident roles.",
+        value: "Sets this channel as the music channel. No role restriction is enabled unless you choose one later.",
       },
       {
         name: "Who can use it",
         value: "Server owner or anyone with **Manage Server**.",
       }
     )
-    .setFooter({ text: "This recovery panel disappears after setup succeeds." });
+    .setFooter({ text: "This recovery panel becomes inactive after setup succeeds." });
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -95,19 +71,11 @@ function buildSetupPanel() {
 }
 
 function buildSetupCompleteEmbed(saved) {
-  const roles = [
-    saved.roleVerifiedId ? `<@&${saved.roleVerifiedId}>` : null,
-    saved.roleResidentId ? `<@&${saved.roleResidentId}>` : null,
-  ].filter(Boolean);
-
   return new EmbedBuilder()
     .setTitle("✅ Stoney Music Setup Complete")
     .setDescription(`Music controls are configured for <#${saved.musicTextChannelId}>.`)
-    .addFields({
-      name: "Access gate",
-      value: roles.length ? `Members must have: ${roles.join(" and ")}` : "No role gate is enabled.",
-    })
-    .setFooter({ text: "The slash commands remain registered; this panel bypasses picker visibility." });
+    .addFields({ name: "Access gate", value: "No role gate is enabled." })
+    .setFooter({ text: "The slash commands remain registered; this panel bypassed the picker issue." });
 }
 
 async function postSetupPanels({ client, configStore, logger = console }) {
@@ -164,29 +132,18 @@ async function handleSetupPanelInteraction(interaction, { configStore, logger = 
     return true;
   }
 
-  const existing = configStore.get(interaction.guildId);
-  const verifiedRole = findConfiguredRole(interaction.guild, {
-    id: existing.roleVerifiedId,
-    name: existing.roleVerified,
-  });
-  const residentRole = findConfiguredRole(interaction.guild, {
-    id: existing.roleResidentId,
-    name: existing.roleResident,
-  });
-
   const saved = await configStore.set(interaction.guildId, {
     musicTextChannelId: channel.id,
-    roleVerifiedId: verifiedRole?.id || null,
-    roleVerified: verifiedRole?.name || null,
-    roleResidentId: residentRole?.id || null,
-    roleResident: residentRole?.name || null,
+    roleVerifiedId: null,
+    roleVerified: null,
+    roleResidentId: null,
+    roleResident: null,
   });
 
   await interaction.update({ embeds: [buildSetupCompleteEmbed(saved)], components: [] });
   logger.log?.(
     `✅ Stoney Music recovery setup completed for ${interaction.guild.name} (${interaction.guildId}): ` +
-      `channel=${saved.musicTextChannelId} verified=${saved.roleVerifiedId || "none"} ` +
-      `resident=${saved.roleResidentId || "none"}`
+      `channel=${saved.musicTextChannelId} roleGate=none`
   );
   return true;
 }
@@ -196,9 +153,7 @@ module.exports = {
   buildSetupCompleteEmbed,
   buildSetupPanel,
   chooseSetupChannel,
-  findConfiguredRole,
   handleSetupPanelInteraction,
   isUsableSetupChannel,
-  normalizeRoleName,
   postSetupPanels,
 };
