@@ -8,6 +8,8 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const application = fs.readFileSync(path.join(root, "application.yml"), "utf8");
 const start = fs.readFileSync(path.join(root, "start.sh"), "utf8");
+const workflow = fs.readFileSync(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
+const discloud = fs.readFileSync(path.join(root, "discloud.config"), "utf8");
 
 test("Lavalink config uses current plugins and no retired YouTube clients", () => {
   assert.match(application, /youtube-plugin:1\.18\.1/);
@@ -32,6 +34,13 @@ test("start script pins DAVE-capable Lavalink and supervises both processes", ()
   assert.match(start, /EXPECTED_LAVALINK_VERSION="\$\{LAVALINK_VERSION:-4\.2\.2\}"/);
   assert.match(start, /wait -n "\$LAVALINK_PID" "\$BOT_PID"/);
   assert.doesNotMatch(start, /exec node src\/index\.js/);
+});
+
+test("CI and Discloud use the committed dependency lockfile", () => {
+  assert.match(workflow, /npm ci --ignore-scripts/);
+  assert.doesNotMatch(workflow, /npm install/);
+  assert.match(discloud, /^BUILD=npm ci --omit=dev --ignore-scripts$/m);
+  assert.equal(fs.existsSync(path.join(root, "package-lock.json")), true);
 });
 
 test("publishable tree does not contain a live environment file", () => {
