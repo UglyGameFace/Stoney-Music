@@ -44,6 +44,10 @@ lavalink:
     trackStuckThresholdMs: 10000
     useSeekGhosting: true
     playerUpdateInterval: 5
+    soundcloudSearchEnabled: true
+    # SoundCloud Go+/preview-only results can resolve and emit a start event,
+    # then fail with a 404 when Lavalink requests the actual HLS stream.
+    soundcloudFilterOutPreviewTracks: true
 
 plugins:
   youtube:
