@@ -1,0 +1,97 @@
+"use strict";
+
+const { Routes } = require("discord.js");
+
+function commandNames(commands) {
+  return commands
+    .map((command) => String(command?.name || "").trim())
+    .filter(Boolean)
+    .sort();
+}
+
+function connectedGuildSummary(guilds) {
+  const cached = [...(guilds?.cache?.values?.() || [])];
+  if (!cached.length) return "none";
+  return cached
+    .map((guild) => `${guild.name || "Unnamed Server"} (${guild.id})`)
+    .sort()
+    .join(", ");
+}
+
+function verifyRegisteredCommands(expectedCommands, registeredCommands) {
+  if (!Array.isArray(registeredCommands)) {
+    throw new Error("Discord returned an invalid command-registration response.");
+  }
+
+  const expected = commandNames(expectedCommands);
+  const actual = commandNames(registeredCommands);
+  const missing = expected.filter((name) => !actual.includes(name));
+  const unexpected = actual.filter((name) => !expected.includes(name));
+
+  if (missing.length || unexpected.length) {
+    throw new Error(
+      `Discord command verification failed. Missing: ${missing.join(", ") || "none"}; ` +
+        `unexpected: ${unexpected.join(", ") || "none"}.`
+    );
+  }
+
+  return actual;
+}
+
+async function syncApplicationCommands({
+  rest,
+  applicationId,
+  guildId,
+  guilds,
+  commands,
+  logger = console,
+}) {
+  if (!rest || !applicationId || !Array.isArray(commands)) {
+    throw new TypeError("Command sync requires rest, applicationId, and a commands array.");
+  }
+
+  const expectedNames = commandNames(commands);
+  if (!expectedNames.length) throw new Error("No slash commands were built for registration.");
+
+  if (guildId) {
+    const guild = guilds?.cache?.get?.(guildId);
+    if (!guild) {
+      throw new Error(
+        `GUILD_ID ${guildId} is not a server this bot is connected to. ` +
+          `Connected servers: ${connectedGuildSummary(guilds)}.`
+      );
+    }
+
+    logger.log?.(
+      `🧭 Registering ${expectedNames.length} guild commands for ${guild.name} (${guild.id})...`
+    );
+    const registered = await rest.put(
+      Routes.applicationGuildCommands(applicationId, guild.id),
+      { body: commands }
+    );
+    const actualNames = verifyRegisteredCommands(commands, registered);
+    logger.log?.(
+      `✅ Discord accepted ${actualNames.length} guild commands for ${guild.name} (${guild.id}): ` +
+        actualNames.map((name) => `/${name}`).join(", ")
+    );
+    return { scope: "guild", guildId: guild.id, commandNames: actualNames };
+  }
+
+  logger.warn?.(
+    "⚠️ GUILD_ID is not set. Registering global commands instead of immediate server commands."
+  );
+  const registered = await rest.put(Routes.applicationCommands(applicationId), { body: commands });
+  const actualNames = verifyRegisteredCommands(commands, registered);
+  logger.log?.(
+    `✅ Discord accepted ${actualNames.length} global commands: ` +
+      actualNames.map((name) => `/${name}`).join(", ")
+  );
+  return { scope: "global", guildId: null, commandNames: actualNames };
+}
+
+module.exports = {
+  commandNames,
+  connectedGuildSummary,
+  syncApplicationCommands,
+  verifyRegisteredCommands,
+};
