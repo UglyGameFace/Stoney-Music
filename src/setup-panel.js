@@ -25,6 +25,23 @@ const COMMAND_ORDER = [
   "filter",
 ];
 
+function commandIdMap(commands) {
+  return Object.fromEntries(
+    [...commands.values()]
+      .filter((command) => command?.id && command?.name)
+      .map((command) => [String(command.name), String(command.id)])
+  );
+}
+
+async function resolveCommandIds(guild, commandIds = {}) {
+  if (Object.keys(commandIds).length) return commandIds;
+  try {
+    return commandIdMap(await guild.commands.fetch());
+  } catch {
+    return {};
+  }
+}
+
 function formatCommandMentions(commandIds = {}) {
   return COMMAND_ORDER.map((name) => {
     const id = commandIds[name];
@@ -123,9 +140,12 @@ async function postSetupPanels({
   commandIds = {},
   logger = console,
 }) {
-  const guilds = targetGuildId
-    ? [client.guilds.cache.get(targetGuildId)].filter(Boolean)
-    : [...client.guilds.cache.values()];
+  const effectiveGuildId = targetGuildId || process.env.GUILD_ID || null;
+  const guilds = effectiveGuildId
+    ? [client.guilds.cache.get(effectiveGuildId)].filter(Boolean)
+    : client.guilds.cache.size === 1
+      ? [...client.guilds.cache.values()]
+      : [];
 
   for (const guild of guilds) {
     if (configStore.hasSavedSetup(guild.id)) continue;
@@ -149,7 +169,8 @@ async function postSetupPanels({
     }
 
     try {
-      const message = await channel.send(buildSetupPanel(commandIds));
+      const resolvedCommandIds = await resolveCommandIds(guild, commandIds);
+      const message = await channel.send(buildSetupPanel(resolvedCommandIds));
       await configStore.set(guild.id, {
         setupPanelChannelId: channel.id,
         setupPanelMessageId: message.id,
@@ -226,7 +247,8 @@ async function handleSetupPanelInteraction(
     setupPanelMessageId: interaction.message?.id || null,
   });
 
-  const completeEmbed = buildSetupCompleteEmbed(saved, commandIds);
+  const resolvedCommandIds = await resolveCommandIds(interaction.guild, commandIds);
+  const completeEmbed = buildSetupCompleteEmbed(saved, resolvedCommandIds);
   await interaction.update({ embeds: [completeEmbed], components: [] });
 
   if (channel.id !== interaction.channelId) {
@@ -246,10 +268,12 @@ module.exports = {
   SETUP_CHANNEL_SELECT_ID,
   buildSetupCompleteEmbed,
   buildSetupPanel,
+  commandIdMap,
   chooseSetupChannel,
   formatCommandMentions,
   handleSetupPanelInteraction,
   isUsableSetupChannel,
   postSetupPanels,
+  resolveCommandIds,
   resolveSelectedChannel,
 };
