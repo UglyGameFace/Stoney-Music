@@ -1,0 +1,55 @@
+# Active Task — Restore Stoney Music playback
+
+## Scope
+Restore and harden YouTube playback, tokenless Apple Music song/album resolution, and tokenless Spotify single-link resolution; repair queue lifecycle; sanitize and validate the project before publishing it to a new private GitHub repository.
+
+## Root-cause findings
+- The backup bundled Lavalink 4.1.2 and stale YouTube-source 1.16.0 configuration.
+- Removed/renamed YouTube client identifiers were configured.
+- Lavalink v4 `track`, `search`, and `playlist` load-result shapes were parsed incorrectly, causing valid results to appear empty.
+- Apple Music was disabled. Enabling LavaSrc without Apple credentials would not repair it; Apple is a metadata mirror rather than a direct protected-audio source.
+- Spotify was configured as though credentials/token infrastructure existed when it did not.
+- Track-end reasons were ignored, allowing manual skip to replay under track-loop and allowing failure/end races to double-advance.
+- The old shell pipeline tracked `tee` instead of Java and `exec node` bypassed cleanup.
+- The backup contained a live `.env` and an obsolete generated Lavalink JAR; neither belongs in Git history.
+
+## Implemented changes
+- Added one canonical resolver with correct Lavalink v4 parsing and bounded `ytsearch` → `ytmsearch` → `scsearch` fallback.
+- Added public Apple/iTunes metadata resolution for Apple Music songs and albums, with bounded concurrency and clear unsupported-playlist errors.
+- Added official Spotify oEmbed resolution for tracks and episodes, including safe expansion of mobile `spotify.link` redirects.
+- Upgraded the deployment line to Lavalink 4.2.2, youtube-source 1.18.1, Shoukaku 4.3.0, discord.js 14.26.4, and dotenv 17.4.2.
+- Removed the unused LavaSrc plugin/configuration so there is no conflicting second metadata implementation.
+- Rebuilt queue transitions around serialized end-reason handling, stale-event rejection, exception recovery, and same-voice-channel controls.
+- Replaced the process launcher with actual Java/Node PID supervision and cleanup.
+- Added Discord markdown/mention/link sanitization for third-party track metadata.
+- Added secret-safe `.gitignore`, `.discloudignore`, `.env.example`, CI, deployment docs, and troubleshooting guidance.
+
+## Validation status
+- JavaScript syntax check: passed for 15 files.
+- Bash syntax check: passed.
+- `application.yml`: parsed and semantically checked.
+- Regression/integration suite: 28/28 passed.
+- Process-supervision integration test: passed and confirmed Lavalink cleanup after Node exit.
+- Exact-value scan against live secrets from the original backup: passed with no matches.
+- Generic Discord/GitHub token and private-key pattern scan: passed.
+- Duplicate/conflict inspection: one resolver, one guild-player class, one player manager, and one interaction owner.
+- Node 22.16.0 and Java 21 local validation environment confirmed.
+- Dependency installation could not be completed in this sandbox because its npm registry was unreachable and no offline cache existed. GitHub CI is configured to install and validate dependencies once published.
+- Live Discord/Discloud playback smoke testing remains required because this environment has no bot token, voice connection, or outbound package/runtime access.
+
+## Cleanup status
+- Original backup remains untouched.
+- Publishable tree contains no `.env`, live token, Lavalink JAR, plugins, logs, caches, `node_modules`, or deployment archives.
+- Stale Lavalink/LavaSrc configuration and duplicate/obsolete resolver behavior were removed rather than retained as compatibility patches.
+
+## Publication status
+The sanitized source is being published to `UglyGameFace/Stoney-Music`. The repository baseline must pass GitHub dependency installation and CI on the exact published commit before it is treated as merge/deployment-ready.
+
+## Remaining external gates
+- GitHub Actions must install the real dependencies and pass the complete validation suite.
+- A controlled Discloud smoke test must verify text search, direct YouTube playback, YouTube playlists, Apple Music song/album matching, Spotify track/mobile-link matching, skip/loop behavior, failure recovery, and process cleanup.
+
+## Backlog
+- Full Spotify album/playlist expansion after valid Spotify application credentials become available.
+- Apple Music playlist expansion after valid Apple Music API credentials become available.
+- Optional OAuth, poToken, or remote cipher only if live hosting-IP diagnostics prove they are needed; none should be enabled blindly.
