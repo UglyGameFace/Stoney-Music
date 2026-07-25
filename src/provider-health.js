@@ -18,6 +18,16 @@ function providerForSearchIdentifier(identifier) {
   const value = String(identifier || "").trim().toLowerCase();
   if (/^(?:ytsearch|ytmsearch):/.test(value)) return "youtube";
   if (/^scsearch:/.test(value)) return "soundcloud";
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^www\./, "");
+    if (host === "youtube.com" || host === "music.youtube.com" || host === "youtu.be") {
+      return "youtube";
+    }
+    if (host === "soundcloud.com" || host === "on.soundcloud.com") return "soundcloud";
+  } catch {
+    // Not a URL; search prefixes above are the only relevant provider identifiers.
+  }
   return null;
 }
 
@@ -121,10 +131,7 @@ class ProviderHealthStore {
   async block(provider, reason, { now = Date.now(), cooldownMs = null } = {}) {
     const name = String(provider || "").trim();
     if (!name) return 0;
-    const duration = Math.max(
-      60_000,
-      Number(cooldownMs) || (name === "youtube" ? this.youtubeCooldownMs : this.youtubeCooldownMs)
-    );
+    const duration = Math.max(60_000, Number(cooldownMs) || this.youtubeCooldownMs);
     const providers = this._nodeState();
     const previous = providers[name] || {};
     providers[name] = {
