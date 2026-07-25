@@ -18,9 +18,22 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --ignore-scripts
-      - run: npm run validate
+      - name: Run full validation with diagnostic log
+        id: validation
+        continue-on-error: true
+        run: npm run validate 2>&1 | tee validation.log
+      - name: Upload validation diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strict-mirror-validation
+          path: validation.log
+          retention-days: 1
+      - name: Fail when validation failed
+        if: steps.validation.outcome != 'success'
+        run: exit 1
       - name: Verify runtime imports
-        run: node -e "require('./src/player'); require('./src/commands'); require('./src/player-controller'); require('./src/autoplay'); console.log('Runtime imports passed.')"
+        run: node -e "require('./src/player'); require('./src/commands'); require('./src/player-controller'); require('./src/autoplay'); require('./src/playback-cache'); require('./src/resilient-guild-player'); console.log('Runtime imports passed.')"
       - name: Check for accidentally committed secrets/runtime files
         run: |
           test ! -f .env
