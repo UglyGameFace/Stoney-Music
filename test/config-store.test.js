@@ -24,6 +24,7 @@ test("guild setup persists channel, optional roles, and recovery panel identity"
     roleResident: null,
     setupPanelChannelId: "111",
     setupPanelMessageId: "222",
+    setupPanelVersion: "3",
   });
   assert.equal(first.hasSavedSetup("123"), true);
 
@@ -38,7 +39,20 @@ test("guild setup persists channel, optional roles, and recovery panel identity"
     roleResident: null,
     setupPanelChannelId: "111",
     setupPanelMessageId: "222",
+    setupPanelVersion: "3",
   });
+});
+
+test("different servers keep completely isolated music setup", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stoney-multiguild-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const store = new GuildConfigStore({ filePath: path.join(directory, "guild-config.json") });
+  await store.load();
+  await store.set("guild-a", { musicTextChannelId: "channel-a" });
+  await store.set("guild-b", { musicTextChannelId: "channel-b" });
+
+  assert.equal(store.get("guild-a").musicTextChannelId, "channel-a");
+  assert.equal(store.get("guild-b").musicTextChannelId, "channel-b");
 });
 
 test("recording a recovery panel does not count as completed music setup", async (t) => {
@@ -49,12 +63,13 @@ test("recording a recovery panel does not count as completed music setup", async
   await store.set("123", {
     setupPanelChannelId: "111",
     setupPanelMessageId: "222",
+    setupPanelVersion: "3",
   });
   assert.equal(store.hasSavedSetup("123"), false);
   assert.equal(store.get("123").setupPanelMessageId, "222");
 });
 
-test("legacy environment channel defaults are ignored until setup explicitly saves a channel", async () => {
+test("legacy environment channel defaults are ignored until setup saves a channel", async () => {
   const store = new GuildConfigStore({
     filePath: path.join(os.tmpdir(), `missing-stoney-${Date.now()}.json`),
     defaults: { musicTextChannelId: "old-channel" },
