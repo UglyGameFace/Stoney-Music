@@ -63,7 +63,21 @@ class FakeShoukaku {
   }
 }
 
-async function connectedPlayer({ resolveFallback, onFallbackVerified, onFallbackFailed } = {}) {
+async function waitFor(predicate, { timeoutMs = 500, intervalMs = 5 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("Timed out waiting for condition.");
+}
+
+async function connectedPlayer({
+  resolveFallback,
+  onFallbackVerified,
+  onFallbackFailed,
+  playbackStartTimeoutMs,
+} = {}) {
   const fake = new FakePlayer();
   const logs = [];
   const player = new ResilientGuildPlayer(new FakeShoukaku(fake), "guild", {
@@ -75,6 +89,7 @@ async function connectedPlayer({ resolveFallback, onFallbackVerified, onFallback
     resolveFallback,
     onFallbackVerified,
     onFallbackFailed,
+    playbackStartTimeoutMs,
   });
   await player.connect({ guildId: "guild", voiceChannelId: "voice", shardId: 0 });
   return { player, fake, logs };
@@ -231,4 +246,53 @@ test("fallback verification ignores a stale start event", async () => {
   fake.emit("start", { track: { encoded: "mirror" } });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(verified, ["mirror"]);
+});
+
+test("a missing Lavalink start event triggers mirror recovery without waiting for an exception event", async () => {
+  const original = track("Watchdog Song", { encoded: "watchdog-original" });
+  const mirror = track("Watchdog Song", {
+    encoded: "watchdog-mirror",
+    sourceName: "bandcamp",
+    playbackCandidateTitle: "Artist - Watchdog Song",
+    isFallback: true,
+  });
+  let searches = 0;
+  const { player, fake, logs } = await connectedPlayer({
+    playbackStartTimeoutMs: 25,
+    resolveFallback: async () => {
+      searches += 1;
+      return { candidates: [mirror], track: mirror, score: 0.99 };
+    },
+  });
+
+  player.enqueue(original);
+  await player.playNext();
+  await waitFor(() => fake.played.includes("watchdog-mirror"));
+  fake.emit("start", { track: { encoded: "watchdog-mirror" } });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(searches, 1);
+  assert.equal(player.nowPlaying().encoded, "watchdog-mirror");
+  assert.match(JSON.stringify(logs), /did not confirm playback start/);
+  assert.match(JSON.stringify(logs), /Trying strict playback mirror/);
+});
+
+test("a real Lavalink start event cancels the watchdog", async () => {
+  const original = track("Started Song", { encoded: "started-song" });
+  let searches = 0;
+  const { player, fake } = await connectedPlayer({
+    playbackStartTimeoutMs: 20,
+    resolveFallback: async () => {
+      searches += 1;
+      return { candidates: [] };
+    },
+  });
+
+  player.enqueue(original);
+  await player.playNext();
+  fake.emit("start", { track: { encoded: "started-song" } });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  assert.equal(searches, 0);
+  assert.equal(player.nowPlaying().encoded, "started-song");
 });
