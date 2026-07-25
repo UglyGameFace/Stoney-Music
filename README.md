@@ -35,13 +35,15 @@ Apple Music and Spotify links do not stream protected audio from those services.
 
 After installing the app to the server with both `bot` and `applications.commands`, restart the bot. On a one-server deployment, Stoney Music automatically registers guild commands even when `GUILD_ID` is omitted.
 
-Run `/setup` as a server admin. It defaults the music command channel to the channel where the command is used and auto-detects `Verified` and `Resident` roles when those roles exist. Optional channel and role selections can be supplied directly in the command. The saved setup is reused after restarts.
+Use `/setup` as a server admin when Discord displays the slash commands. The music channel defaults to the channel where setup is run. Role restrictions are optional and are only enabled when roles are explicitly selected.
 
-The bot must appear under **Server Settings → Integrations → Bots and Apps** before any slash command can appear.
+If Discord accepts the commands but a client does not display them, Stoney Music posts a recovery setup card in the configured/default channel or the first text channel it can use. A server admin can press **Set Up In This Channel** to finish setup without using the command picker. The recovery path enables no role gate.
+
+The saved setup is reused after restarts. Once setup is saved, the recovery card is not posted again.
 
 ## Environment setup
 
-Copy `.env.example` to `.env` for local use, or configure the same variables in Discloud. Never commit `.env`.
+A physical `.env` file is optional. Local deployments may copy `.env.example` to `.env`; Discloud deployments may use Discloud's native environment-variable panel instead. Both paths populate `process.env`. Never commit `.env`.
 
 Required:
 
@@ -51,15 +53,16 @@ Required:
 Optional:
 
 - `GUILD_ID` — the bot auto-detects its server when connected to exactly one
-- `MUSIC_TEXT_CHANNEL_ID` — legacy/default channel; `/setup` replaces it with the saved selection
-- `ROLE_VERIFIED` — defaults to `Verified`
-- `ROLE_RESIDENT` — defaults to `Resident`
+- `MUSIC_TEXT_CHANNEL_ID` — legacy/default channel; setup replaces it with the saved selection
+- `MUSIC_CONFIG_PATH` — override the saved runtime configuration path
+
+No server role names are assumed. Access roles are optional and setup-managed.
 
 ## Slash commands
 
 The bot registers `/setup` plus the music commands:
 
-- `/setup` — admin-only first-time configuration
+- `/setup` — admin-only first-time configuration; runtime still verifies **Manage Server**
 - `/play`
 - `/skip`
 - `/stop`
@@ -74,6 +77,12 @@ For the fastest and clearest registration, set `GUILD_ID` to the exact server wh
 ```text
 🧭 Registering 9 guild commands for Server Name (SERVER_ID)...
 ✅ Discord accepted 9 guild commands for Server Name (SERVER_ID): /filter, /loop, /nowplaying, /play, /queue, /setup, /skip, /stop, /volume
+```
+
+When setup has not been saved, a healthy recovery startup also logs:
+
+```text
+🧰 Posted Stoney Music recovery setup panel in #channel-name (CHANNEL_ID); message=MESSAGE_ID.
 ```
 
 On a one-server deployment, a missing or stale `GUILD_ID` is recovered automatically from the connected server. Multi-server deployments still require an exact `GUILD_ID` for immediate guild commands.
@@ -124,19 +133,20 @@ The included `discloud.config`:
 - sets `MAIN=src/bootstrap.js`, so startup remains correct even if Discloud ignores a custom `START` command;
 - allocates 2 GB RAM.
 
-Upload a ZIP containing the project root. Do not include `.env`, `node_modules`, logs, plugin downloads, or a stale Lavalink JAR. Configure secrets in the Discloud environment panel.
+Upload a ZIP containing the project root. Do not include `.env`, `node_modules`, logs, plugin downloads, or a stale Lavalink JAR. Configure secrets and settings in the Discloud environment panel.
 
 ### Expected startup order
 
 A healthy Discloud boot should show this order before Discord login:
 
-1. one environment-file message;
+1. optional environment-file message when an actual `.env` exists;
 2. Java version detection;
 3. Lavalink download or installed-version confirmation;
 4. `Starting Lavalink`;
 5. `Lavalink is accepting connections`;
 6. `Starting Stoney Music bot`;
-7. Discord login and slash-command registration.
+7. Discord login and slash-command registration;
+8. recovery setup-panel post when setup has not yet been saved.
 
 Seeing `(node:1)` immediately followed by `ECONNREFUSED 127.0.0.1:2333` means an old deployment is still launching `src/index.js` directly instead of the bootstrap. Redeploy the current project root so Discloud reads the updated `discloud.config`.
 
