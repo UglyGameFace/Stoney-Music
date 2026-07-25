@@ -15,6 +15,8 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - The first GitHub run exposed a publish-audit false positive: it inspected the working tree after installation and treated untracked `node_modules/` as committed content.
 - The first live Discloud boot launched `src/index.js` as PID 1 and never executed `start.sh`; therefore Lavalink was never started and Shoukaku received `ECONNREFUSED 127.0.0.1:2333`.
 - The Discord entrypoint loaded the same `/home/node/.env` twice through duplicate candidate paths and still used the deprecated `ready` event name.
+- Discord accepted all nine guild commands for the correct live server, but the Android client still did not display them after reinstall, cache clearing, and full owner permissions.
+- Old `Verified` and `Resident` role defaults were server-specific leftovers and must not be assumed for the current server.
 
 ## Implemented changes
 - Added one canonical resolver with correct Lavalink v4 parsing and bounded `ytsearch` → `ytmsearch` → `scsearch` fallback.
@@ -32,9 +34,13 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - Replaced the deployment entrypoint with `src/bootstrap.js` and set it as Discloud `MAIN`, npm start, and the `start.sh` delegate, so Java/Lavalink startup cannot be bypassed by Discloud choosing the main file directly.
 - Added one idempotent environment loader and migrated Discord startup to `Events.ClientReady`.
 - Added readiness timeout and partial-startup cleanup coverage, including termination of Lavalink when the bot exits or readiness never succeeds.
+- Added persistent `/setup` configuration and automatic single-server guild-command registration.
+- Added a slash-command-independent recovery setup card with an admin button for clients that do not display registered commands.
+- Removed all default role-name assumptions; setup enables no role gate unless roles are explicitly selected.
+- Confirmed that Discloud native environment variables are supported without a physical `.env` file.
 
 ## Validation status
-- JavaScript syntax check: passed for 19 files.
+- JavaScript syntax check: passed for 19 files before the recovery-panel branch.
 - Bash syntax check: passed.
 - `application.yml`: parsed and semantically checked.
 - Local regression/integration suite: 35/35 passed after the Discloud bootstrap repair.
@@ -48,25 +54,27 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - GitHub Actions run `30146935379`: passed with `npm ci`, 31/31 tests, real Discord.js/Shoukaku imports, and committed-secret/runtime-file checks.
 - Bootstrap repair GitHub Actions run `30147546280`: passed on the implementation head with locked `npm ci`, 35/35 tests, runtime imports, and secret/runtime-file checks.
 - Exact final PR-head GitHub Actions run `30147578549`: passed with locked `npm ci`, 35/35 tests, runtime imports, and secret/runtime-file checks.
-- Squash merge tree committed to `main` as `9a964fe88d09a997c55cbee9ef691280222f0172`.
+- Persistent setup PR #5 passed GitHub Actions and was squash-merged as `7944d7babbc625ac7c28a0b5b8100c7d745e739c`.
+- Recovery-panel PR #6 is awaiting its exact hosted validation result.
 
 ## Cleanup status
 - Original backup remains untouched.
 - Published tree contains no `.env`, live token, Lavalink JAR, plugins, logs, caches, `node_modules`, or deployment archives.
 - Stale Lavalink/LavaSrc configuration and duplicate/obsolete resolver behavior were removed rather than retained as compatibility patches.
 - Validation PRs #1 and #2 were closed without merge; their trigger files never entered `main`.
-- Startup repair PR #3 was squash-merged after its exact final head passed GitHub Actions.
+- Startup repair PR #3 and setup PR #5 were squash-merged after hosted validation.
 
 ## Publication status
 - Sanitized source is published to `UglyGameFace/Stoney-Music` on `main`.
 - Deterministic dependency lock is committed.
-- Discloud startup repair is merged on `main` at `9a964fe88d09a997c55cbee9ef691280222f0172`.
+- Current production baseline on `main` is `7944d7babbc625ac7c28a0b5b8100c7d745e739c` pending recovery-panel validation and merge.
 - The repository is currently public. No secrets were published, but the originally intended visibility was private.
 
 ## Remaining external gates
-- Change repository visibility to private if the source should not remain public; the connected GitHub integration cannot change visibility.
-- Redeploy the current `main` tree to Discloud while preserving the required environment variables.
-- Confirm the healthy bootstrap log order and run controlled live tests for text search, direct YouTube playback, YouTube playlists, Apple Music song/album matching, Spotify track/mobile-link matching, skip/loop behavior, failure recovery, and process cleanup.
+- Pass the exact GitHub Actions run for recovery-panel PR #6 and merge it.
+- Redeploy the resulting `main` tree to Discloud while preserving native environment variables.
+- Press the posted **Set Up In This Channel** recovery button and confirm the saved channel has no role gate.
+- Run controlled live tests for text search, direct YouTube playback, YouTube playlists, Apple Music song/album matching, Spotify track/mobile-link matching, skip/loop behavior, failure recovery, and process cleanup.
 
 ## Backlog
 - Full Spotify album/playlist expansion after valid Spotify application credentials become available.
