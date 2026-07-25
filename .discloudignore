@@ -11,3 +11,5 @@ logs/
 plugins/
 lavalink.log
 *.zip
+data/guild-config.json
+data/guild-config.json.tmp

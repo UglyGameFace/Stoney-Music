@@ -239,7 +239,7 @@ async function run() {
   env.LAVALINK_SECURE = String(env.LAVALINK_SECURE || "false").trim().toLowerCase();
   env.LAVALINK_VERSION = String(env.LAVALINK_VERSION || DEFAULT_LAVALINK_VERSION).trim();
 
-  const missing = missingKeys(env, ["DISCORD_TOKEN", "MUSIC_TEXT_CHANNEL_ID", "LAVALINK_PASSWORD"]);
+  const missing = missingKeys(env, ["DISCORD_TOKEN", "LAVALINK_PASSWORD"]);
   if (missing.length) throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
 
   const port = Number.parseInt(env.LAVALINK_PORT, 10);

@@ -30,3 +30,7 @@ backup-*
 Thumbs.db
 .vscode/
 .idea/
+
+# Runtime server setup
+data/guild-config.json
+data/guild-config.json.tmp

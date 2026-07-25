@@ -11,11 +11,13 @@ const {
   GatewayIntentBits,
   MessageFlags,
   Partials,
+  PermissionFlagsBits,
   REST,
 } = require("discord.js");
 
 const { buildCommands } = require("./commands");
 const { syncApplicationCommands } = require("./command-sync");
+const { GuildConfigStore } = require("./config-store");
 const { enforceGuards } = require("./guards");
 const { PlayerManager } = require("./player");
 const { MusicResolutionError, toQueueTrack } = require("./resolver");
@@ -58,12 +60,17 @@ async function sendInteractionError(interaction, error) {
 const cfg = {
   token: process.env.DISCORD_TOKEN,
   guildId: process.env.GUILD_ID || null,
-  musicTextChannelId: process.env.MUSIC_TEXT_CHANNEL_ID,
-  roleVerified: process.env.ROLE_VERIFIED || "Verified",
-  roleResident: process.env.ROLE_RESIDENT || "Resident",
 };
 
-const missingDiscord = missingKeys(["DISCORD_TOKEN", "MUSIC_TEXT_CHANNEL_ID"]);
+const configStore = new GuildConfigStore({
+  defaults: {
+    musicTextChannelId: process.env.MUSIC_TEXT_CHANNEL_ID || null,
+    roleVerified: process.env.ROLE_VERIFIED || "Verified",
+    roleResident: process.env.ROLE_RESIDENT || "Resident",
+  },
+});
+
+const missingDiscord = missingKeys(["DISCORD_TOKEN"]);
 if (missingDiscord.length) {
   throw new Error(
     `Missing required environment variable(s): ${missingDiscord.join(", ")}. ` +
@@ -104,6 +111,7 @@ let players = null;
 
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
+  await configStore.load();
   players = new PlayerManager({ nodes, discordClient: client });
 
   const rest = new REST({ version: "10" }).setToken(cfg.token);
@@ -130,8 +138,86 @@ client.once(Events.ClientReady, async () => {
   }
 });
 
+function findRoleByName(guild, name) {
+  if (!name) return null;
+  const target = String(name).toLowerCase();
+  return guild.roles.cache.find((role) => role.name.toLowerCase() === target) || null;
+}
+
+async function handleSetup(interaction) {
+  if (!interaction.inGuild()) {
+    await interaction.reply({ content: "Server only.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    await interaction.reply({
+      content: "You need **Manage Server** to configure Stoney Music.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const existing = configStore.get(interaction.guildId);
+  const musicChannel = interaction.options.getChannel("music_channel") || interaction.channel;
+  if (!musicChannel?.isTextBased?.() || musicChannel.isThread?.()) {
+    await interaction.reply({
+      content: "Choose a regular server text channel for music commands.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const verifiedRole =
+    interaction.options.getRole("verified_role") ||
+    interaction.guild.roles.cache.get(existing.roleVerifiedId) ||
+    findRoleByName(interaction.guild, existing.roleVerified);
+  const residentRole =
+    interaction.options.getRole("resident_role") ||
+    interaction.guild.roles.cache.get(existing.roleResidentId) ||
+    findRoleByName(interaction.guild, existing.roleResident);
+
+  const saved = await configStore.set(interaction.guildId, {
+    musicTextChannelId: musicChannel.id,
+    roleVerifiedId: verifiedRole?.id || null,
+    roleVerified: verifiedRole?.name || null,
+    roleResidentId: residentRole?.id || null,
+    roleResident: residentRole?.name || null,
+  });
+
+  const access = [
+    saved.roleVerifiedId ? `<@&${saved.roleVerifiedId}>` : null,
+    saved.roleResidentId ? `<@&${saved.roleResidentId}>` : null,
+  ].filter(Boolean);
+
+  const embed = new EmbedBuilder()
+    .setTitle("✅ Stoney Music Setup Complete")
+    .setDescription(`Music commands will work in <#${saved.musicTextChannelId}>.`)
+    .addFields({
+      name: "Who can use it",
+      value: access.length ? `Members must have: ${access.join(" and ")}` : "No role gate is enabled.",
+    })
+    .setFooter({ text: "Run /setup again any time to change these settings." });
+
+  await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  console.log(
+    `✅ Stoney Music configured for ${interaction.guild.name} (${interaction.guildId}): ` +
+      `channel=${saved.musicTextChannelId} verified=${saved.roleVerifiedId || "none"} ` +
+      `resident=${saved.roleResidentId || "none"}`
+  );
+}
+
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === "setup") {
+    try {
+      await handleSetup(interaction);
+    } catch (error) {
+      console.error("Stoney Music setup failed:", error);
+      await sendInteractionError(interaction, error);
+    }
+    return;
+  }
 
   if (!players) {
     await interaction.reply({
@@ -141,7 +227,8 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  if (!(await enforceGuards(interaction, cfg))) return;
+  const guildConfig = configStore.get(interaction.guildId);
+  if (!(await enforceGuards(interaction, guildConfig))) return;
 
   const guild = interaction.guild;
   const member = interaction.member;

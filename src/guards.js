@@ -1,5 +1,15 @@
-function hasRoleByName(member, roleName) {
-  return member.roles.cache.some((r) => r.name === roleName);
+"use strict";
+
+function hasConfiguredRole(member, roleId, roleName) {
+  if (!roleId && !roleName) return true;
+  if (roleId && member.roles.cache.has(roleId)) return true;
+  if (!roleName) return false;
+  return member.roles.cache.some((role) => role.name.toLowerCase() === roleName.toLowerCase());
+}
+
+function roleLabel(roleId, roleName) {
+  if (roleId) return `<@&${roleId}>`;
+  return roleName || "Unknown role";
 }
 
 async function enforceGuards(interaction, cfg) {
@@ -8,9 +18,17 @@ async function enforceGuards(interaction, cfg) {
     return false;
   }
 
+  if (!cfg.musicTextChannelId) {
+    await interaction.reply({
+      content: "Stoney Music is not configured yet. A server admin needs to run `/setup`.",
+      ephemeral: true,
+    });
+    return false;
+  }
+
   if (interaction.channelId !== cfg.musicTextChannelId) {
     await interaction.reply({
-      content: "Use the music commands channel for that.",
+      content: `Use Stoney Music in <#${cfg.musicTextChannelId}>.`,
       ephemeral: true,
     });
     return false;
@@ -22,17 +40,17 @@ async function enforceGuards(interaction, cfg) {
     return false;
   }
 
-  const ok1 = hasRoleByName(member, cfg.roleVerified);
-  const ok2 = hasRoleByName(member, cfg.roleResident);
+  const verified = hasConfiguredRole(member, cfg.roleVerifiedId, cfg.roleVerified);
+  const resident = hasConfiguredRole(member, cfg.roleResidentId, cfg.roleResident);
 
-  if (!ok1 || !ok2) {
+  if (!verified || !resident) {
     const missing = [
-      !ok1 ? cfg.roleVerified : null,
-      !ok2 ? cfg.roleResident : null,
-    ].filter(Boolean).join(", ");
+      !verified ? roleLabel(cfg.roleVerifiedId, cfg.roleVerified) : null,
+      !resident ? roleLabel(cfg.roleResidentId, cfg.roleResident) : null,
+    ].filter(Boolean);
 
     await interaction.reply({
-      content: `Access locked. Missing: **${missing}**.`,
+      content: `Access locked. Missing: ${missing.join(", ")}.`,
       ephemeral: true,
     });
     return false;
@@ -41,4 +59,4 @@ async function enforceGuards(interaction, cfg) {
   return true;
 }
 
-module.exports = { enforceGuards };
+module.exports = { enforceGuards, hasConfiguredRole, roleLabel };

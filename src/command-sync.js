@@ -53,32 +53,47 @@ async function syncApplicationCommands({
   const expectedNames = commandNames(commands);
   if (!expectedNames.length) throw new Error("No slash commands were built for registration.");
 
+  const connected = [...(guilds?.cache?.values?.() || [])];
+  let targetGuild = null;
   if (guildId) {
-    const guild = guilds?.cache?.get?.(guildId);
-    if (!guild) {
+    targetGuild = guilds?.cache?.get?.(guildId);
+    if (!targetGuild && connected.length === 1) {
+      targetGuild = connected[0];
+      logger.warn?.(
+        `⚠️ Configured GUILD_ID ${guildId} is not connected. ` +
+          `Using the bot's only server instead: ${targetGuild.name} (${targetGuild.id}).`
+      );
+    } else if (!targetGuild) {
       throw new Error(
         `GUILD_ID ${guildId} is not a server this bot is connected to. ` +
           `Connected servers: ${connectedGuildSummary(guilds)}.`
       );
     }
+  } else if (connected.length === 1) {
+    targetGuild = connected[0];
+    logger.warn?.(
+      `⚠️ GUILD_ID is not set. Auto-detected the bot's only server: ${targetGuild.name} (${targetGuild.id}).`
+    );
+  }
 
+  if (targetGuild) {
     logger.log?.(
-      `🧭 Registering ${expectedNames.length} guild commands for ${guild.name} (${guild.id})...`
+      `🧭 Registering ${expectedNames.length} guild commands for ${targetGuild.name} (${targetGuild.id})...`
     );
     const registered = await rest.put(
-      Routes.applicationGuildCommands(applicationId, guild.id),
+      Routes.applicationGuildCommands(applicationId, targetGuild.id),
       { body: commands }
     );
     const actualNames = verifyRegisteredCommands(commands, registered);
     logger.log?.(
-      `✅ Discord accepted ${actualNames.length} guild commands for ${guild.name} (${guild.id}): ` +
+      `✅ Discord accepted ${actualNames.length} guild commands for ${targetGuild.name} (${targetGuild.id}): ` +
         actualNames.map((name) => `/${name}`).join(", ")
     );
-    return { scope: "guild", guildId: guild.id, commandNames: actualNames };
+    return { scope: "guild", guildId: targetGuild.id, commandNames: actualNames };
   }
 
   logger.warn?.(
-    "⚠️ GUILD_ID is not set. Registering global commands instead of immediate server commands."
+    "⚠️ GUILD_ID is not set and the bot is connected to zero or multiple servers. Registering global commands."
   );
   const registered = await rest.put(Routes.applicationCommands(applicationId), { body: commands });
   const actualNames = verifyRegisteredCommands(commands, registered);
