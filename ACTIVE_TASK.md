@@ -46,6 +46,7 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - discord.js 14.26.4 manifest confirms Node >=18; the configured Node 22 line is compatible.
 - Shoukaku source confirms the runtime APIs used by the bot: `getIdealNode`, `joinVoiceChannel`, `rest.resolve`, `playTrack`, `stopTrack`, `setGlobalVolume`, and `setFilters`.
 - GitHub Actions run `30146935379`: passed with `npm ci`, 31/31 tests, real Discord.js/Shoukaku imports, and committed-secret/runtime-file checks.
+- Bootstrap repair PR #3 is the current validation target; its exact head must pass before merge.
 
 ## Cleanup status
 - Original backup remains untouched.
@@ -57,6 +58,7 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - Sanitized source published to `UglyGameFace/Stoney-Music` on `main`.
 - Final validated code/config head before this status-only update: `bc3ace53e3d8e830078c273c5c89dedbe89587b0`.
 - Deterministic dependency lock committed at `66eed491ec33b0382b7ad16148ddcba33fccf37b`.
+- Bootstrap repair is staged in PR #3 from `fix/discloud-lavalink-bootstrap`.
 - The repository is currently public. No secrets were published, but the originally intended visibility was private.
 
 ## Remaining external gates
