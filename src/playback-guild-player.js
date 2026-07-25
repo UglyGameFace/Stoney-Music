@@ -263,7 +263,7 @@ class PlaybackGuildPlayer extends ResilientGuildPlayer {
       (reason === "loadFailed" || (PREMATURE_END_REASONS.has(reason) && longEnoughToRequireProgress));
 
     if (reason === "loadFailed" || prematureEnd) {
-      this.logger.warn?.("📥 Lavalink ended before stable audio; routing into mirror recovery", {
+      this.logger.warn?.("📥 Lavalink ended before stable audio; routing directly into mirror recovery", {
         guildId: this.guildId,
         reason,
         requestedTitle: active?.title,
