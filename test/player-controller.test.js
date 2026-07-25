@@ -312,5 +312,5 @@ test("filter menu and queue button use persistent global handlers", async () => 
   const queue = fakeInteraction({ customId: IDS.queue });
   await manager.handle(queue.interaction);
   assert.equal(queue.calls[0][0], "reply");
-  assert.equal(queue.calls[0][1].flags, undefined);
+  assert.equal(queue.calls[0][1].flags, 64);
 });
