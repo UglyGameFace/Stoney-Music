@@ -41,6 +41,7 @@ const IDS = Object.freeze({
   queueRemove: `${PLAYER_PREFIX}queue_remove`,
   queueMove: `${PLAYER_PREFIX}queue_move`,
   queueClear: `${PLAYER_PREFIX}queue_clear`,
+  queueShuffle: `${PLAYER_PREFIX}queue_shuffle`,
   queueClearConfirm: `${PLAYER_PREFIX}queue_clear_confirm`,
   queueClearCancel: `${PLAYER_PREFIX}queue_clear_cancel`,
   modalRemove: `${PLAYER_PREFIX}modal_remove`,
@@ -113,6 +114,9 @@ function buildPlayerEmbed(guildPlayer, { notice = null } = {}) {
     : state.autoplayEnabled
       ? "No human tracks queued — related music will continue."
       : "Queue is empty.";
+  const requester = /^\d{16,22}$/.test(String(track.requesterId || ""))
+    ? `<@${track.requesterId}>`
+    : "Unknown requester";
 
   embed
     .setDescription(`${title}\n**${artist}**\n\n${progress}`)
@@ -123,18 +127,14 @@ function buildPlayerEmbed(guildPlayer, { notice = null } = {}) {
       { name: "Autoplay", value: state.autoplayEnabled ? "Related music" : "Off", inline: true },
       { name: "Filter", value: escapeDiscordMarkdown(state.filterPreset), inline: true },
       { name: "Source", value: escapeDiscordMarkdown(sourceLabel(track)), inline: true },
+      { name: "Requested By", value: requester, inline: true },
       { name: "Up Next", value: queueText }
     );
 
-  const requester = /^\d{16,22}$/.test(String(track.requesterId || ""))
-    ? `<@${track.requesterId}>`
-    : "Unknown requester";
-  const footerParts = [`Requested by ${requester}`];
   if (track.autoplay) {
     const seed = [track.autoplaySeedAuthor, track.autoplaySeedTitle].filter(Boolean).join(" — ");
-    footerParts.push(seed ? `Recommended from ${seed}` : "Autoplay recommendation");
+    embed.setFooter({ text: seed ? `Recommended from ${seed}`.slice(0, 2048) : "Autoplay recommendation" });
   }
-  embed.setFooter({ text: footerParts.join(" • ").slice(0, 2048) });
 
   const artwork = safeHttpUrl(track.artworkUrl);
   if (artwork) embed.setThumbnail(artwork);
@@ -275,13 +275,12 @@ function buildQueuePayload(guildPlayer, page = 0, { notice = null } = {}) {
     playerButton(IDS.queueRemove, "➖", "Remove", ButtonStyle.Secondary, !state.queue.length),
     playerButton(IDS.queueMove, "↕️", "Move", ButtonStyle.Secondary, state.queue.length < 2),
     playerButton(IDS.queueClear, "🧹", "Clear Queue", ButtonStyle.Danger, !state.queue.length),
-    playerButton(IDS.shuffle, "🔀", "Shuffle", ButtonStyle.Secondary, state.queue.length < 2)
+    playerButton(IDS.queueShuffle, "🔀", "Shuffle", ButtonStyle.Secondary, state.queue.length < 2)
   );
 
   return {
     embeds: [embed],
     components: [navigation, management],
-    flags: MessageFlags.Ephemeral,
     allowedMentions: { parse: [] },
   };
 }
@@ -363,32 +362,35 @@ class PlayerControllerManager {
     return state.messageId === String(interaction.message?.id || "");
   }
 
+  async _fetchRecordedMessage(guildId) {
+    const state = this.messages.get(String(guildId));
+    if (!state) return null;
+    const channel = await this.client.channels.fetch(state.channelId);
+    return channel?.messages?.fetch(state.messageId) || null;
+  }
+
   async publish(interaction, guildPlayer, { notice = null } = {}) {
     this.attach(guildPlayer);
     const guildId = String(guildPlayer.guildId);
-    const existing = this.messages.get(guildId);
 
-    if (existing) {
-      try {
-        const channel = await this.client.channels.fetch(existing.channelId);
-        const message = await channel?.messages?.fetch(existing.messageId);
-        if (message) {
-          await message.edit(buildPlayerPayload(guildPlayer, { notice }));
-          await interaction.editReply({
-            content: notice || "✅ Player updated.",
-            embeds: [],
-            components: [],
-            allowedMentions: { parse: [] },
-          });
-          return message;
-        }
-      } catch (error) {
-        this.messages.delete(guildId);
-        this.logger.warn?.("Recorded player panel could not be updated; creating a new one", {
-          guildId,
-          message: error?.message || String(error),
+    try {
+      const message = await this._fetchRecordedMessage(guildId);
+      if (message) {
+        await message.edit(buildPlayerPayload(guildPlayer, { notice }));
+        await interaction.editReply({
+          content: notice || "✅ Player updated.",
+          embeds: [],
+          components: [],
+          allowedMentions: { parse: [] },
         });
+        return message;
       }
+    } catch (error) {
+      this.messages.delete(guildId);
+      this.logger.warn?.("Recorded player panel could not be updated; creating a new one", {
+        guildId,
+        message: error?.message || String(error),
+      });
     }
 
     const message = await interaction.editReply(buildPlayerPayload(guildPlayer, { notice }));
@@ -398,21 +400,25 @@ class PlayerControllerManager {
 
   async show(interaction, guildPlayer) {
     this.attach(guildPlayer);
-    const message = await interaction.reply({
-      ...buildPlayerPayload(guildPlayer),
-      fetchReply: true,
-    });
-    const previous = this.messages.get(String(guildPlayer.guildId));
-    this.registerMessage(guildPlayer.guildId, message);
-    if (previous && previous.messageId !== message.id) {
-      try {
-        const channel = await this.client.channels.fetch(previous.channelId);
-        const old = await channel?.messages?.fetch(previous.messageId);
-        if (old) await old.edit({ components: buildPlayerComponents(guildPlayer, { disabled: true }) });
-      } catch {
-        // Old or deleted controller messages are harmless once the canonical ID changes.
+    const guildId = String(guildPlayer.guildId);
+    try {
+      const existing = await this._fetchRecordedMessage(guildId);
+      if (existing) {
+        await existing.edit(buildPlayerPayload(guildPlayer));
+        const link = safeHttpUrl(existing.url);
+        await interaction.reply({
+          content: link ? `🎛️ Player controller refreshed: ${link}` : "🎛️ Player controller refreshed.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return existing;
       }
+    } catch {
+      this.messages.delete(guildId);
     }
+
+    await interaction.reply(buildPlayerPayload(guildPlayer));
+    const message = await interaction.fetchReply();
+    this.registerMessage(guildId, message);
     return message;
   }
 
@@ -539,9 +545,19 @@ class PlayerControllerManager {
       await interaction.update(buildQueuePayload(guildPlayer, pageFromCustomId(customId)));
       return true;
     }
-
+    if (customId === IDS.queueShuffle) {
+      const count = guildPlayer.shuffle();
+      await interaction.update(buildQueuePayload(guildPlayer, 0, { notice: `Shuffled ${count} tracks.` }));
+      await this.refresh(interaction.guildId, { notice: `Shuffled ${count} queued tracks.` });
+      return true;
+    }
     if (customId === IDS.queue) {
-      await interaction.reply(buildQueuePayload(guildPlayer, 0));
+      await interaction.reply({ ...buildQueuePayload(guildPlayer, 0), flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    if (interaction.message && !this.isCanonicalMessage(interaction)) {
+      await replyEphemeral(interaction, "That is an old player panel. Use the newest Stoney Music controller.");
       return true;
     }
 
@@ -549,11 +565,6 @@ class PlayerControllerManager {
       await interaction.deferUpdate();
       await guildPlayer.setFilterPreset(interaction.values[0]);
       await this.refresh(interaction.guildId, { notice: `Filter set to ${interaction.values[0]}.` });
-      return true;
-    }
-
-    if (interaction.message && !this.isCanonicalMessage(interaction)) {
-      await replyEphemeral(interaction, "That is an old player panel. Use the newest Stoney Music controller.");
       return true;
     }
 
