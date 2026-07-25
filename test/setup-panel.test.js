@@ -99,6 +99,7 @@ test("recovery channel picker saves the selected channel with no role gate", asy
     },
   };
   const configStore = {
+    get: () => ({ setupPanelMessageId: "panel-message" }),
     async set(guildId, patch) {
       writes.push({ guildId, patch });
       return { ...patch };
@@ -140,6 +141,7 @@ test("recovery shortcut button saves the panel channel", async () => {
     update: async () => {},
   };
   const configStore = {
+    get: () => ({ setupPanelMessageId: "panel-message" }),
     async set(guildId, patch) {
       writes.push({ guildId, patch });
       return { ...patch };
@@ -149,6 +151,38 @@ test("recovery shortcut button saves the panel channel", async () => {
   await handleSetupPanelInteraction(interaction, { configStore, logger: { log() {} } });
   assert.equal(writes[0].patch.musicTextChannelId, channel.id);
   assert.equal(channel.sent.length, 0);
+});
+
+test("stale recovery cards cannot overwrite the selected setup", async () => {
+  const channel = usableChannel("456", "general");
+  const guild = fakeGuild([channel], channel);
+  let replyPayload = null;
+  const interaction = {
+    customId: SETUP_BUTTON_ID,
+    guild,
+    guildId: guild.id,
+    channel,
+    channelId: channel.id,
+    message: { id: "old-message" },
+    isButton: () => true,
+    isChannelSelectMenu: () => false,
+    inGuild: () => true,
+    memberPermissions: { has: () => true },
+    reply: async (payload) => {
+      replyPayload = payload;
+    },
+  };
+
+  const handled = await handleSetupPanelInteraction(interaction, {
+    configStore: {
+      get: () => ({ setupPanelMessageId: "new-message" }),
+      set: async () => assert.fail("stale panel must not save"),
+    },
+    logger: { log() {} },
+  });
+
+  assert.equal(handled, true);
+  assert.match(replyPayload.content, /old Stoney Music setup card/);
 });
 
 test("recovery controls refuse members without Manage Server", async () => {
