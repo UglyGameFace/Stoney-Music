@@ -1,19 +1,31 @@
 "use strict";
 
+const { canonicalTrackKey } = require("./autoplay");
+
 class GuildPlayer {
-  constructor(shoukaku, guildId, { logger = console, resolveFallback = null } = {}) {
+  constructor(
+    shoukaku,
+    guildId,
+    { logger = console, resolveFallback = null, resolveAutoplay = null } = {}
+  ) {
     this.shoukaku = shoukaku;
     this.guildId = guildId;
     this.logger = logger;
     this.resolveFallback = typeof resolveFallback === "function" ? resolveFallback : null;
+    this.resolveAutoplay = typeof resolveAutoplay === "function" ? resolveAutoplay : null;
 
     this.player = null;
     this.voiceChannelId = null;
     this.queue = [];
     this.current = null;
+    this.history = [];
 
     this.volume = 100;
     this.loopMode = "off";
+    this.autoplayEnabled = false;
+    this.autoplaySeed = null;
+    this._autoplayRevision = 0;
+    this._autoplayPrefetch = null;
     this._transition = Promise.resolve();
     this._eventsBound = false;
   }
@@ -47,6 +59,113 @@ class GuildPlayer {
       });
     }, 1_000);
     recovery.unref?.();
+  }
+
+  _invalidateAutoplayPrefetch() {
+    this._autoplayRevision += 1;
+    this._autoplayPrefetch = null;
+  }
+
+  _rememberTrack(track) {
+    if (!track) return;
+    const key = canonicalTrackKey(track);
+    const last = this.history.at(-1);
+    if (!last || canonicalTrackKey(last) !== key) this.history.push(track);
+    if (this.history.length > 50) this.history.splice(0, this.history.length - 50);
+  }
+
+  _primeAutoplay() {
+    if (
+      !this.autoplayEnabled ||
+      !this.resolveAutoplay ||
+      !this.player ||
+      !this.current ||
+      this.queue.length
+    ) {
+      return null;
+    }
+
+    const seed = this.autoplaySeed || this.current;
+    const seedKey = canonicalTrackKey(seed);
+    const currentEncoded = this.current.encoded;
+    const revision = this._autoplayRevision;
+
+    if (
+      this._autoplayPrefetch?.revision === revision &&
+      this._autoplayPrefetch?.seedKey === seedKey &&
+      this._autoplayPrefetch?.currentEncoded === currentEncoded
+    ) {
+      return this._autoplayPrefetch.promise;
+    }
+
+    const promise = Promise.resolve()
+      .then(() =>
+        this.resolveAutoplay(seed, {
+          history: [...this.history],
+          queue: [...this.queue],
+          current: this.current,
+        })
+      )
+      .catch((error) => {
+        this.logger.warn?.("Autoplay prefetch failed", {
+          guildId: this.guildId,
+          title: seed?.title,
+          artist: seed?.author,
+          message: error?.message || String(error),
+        });
+        return null;
+      });
+
+    this._autoplayPrefetch = { revision, seedKey, currentEncoded, promise };
+    return promise;
+  }
+
+  async _resolveAutoplayTrack(finished) {
+    if (!this.autoplayEnabled || !this.resolveAutoplay || !this.player) return null;
+
+    const seed = this.autoplaySeed || finished;
+    if (!seed) return null;
+    const seedKey = canonicalTrackKey(seed);
+    const revision = this._autoplayRevision;
+    const prefetched =
+      this._autoplayPrefetch?.revision === revision &&
+      this._autoplayPrefetch?.seedKey === seedKey
+        ? this._autoplayPrefetch.promise
+        : null;
+
+    const result = await (
+      prefetched ||
+      this.resolveAutoplay(seed, {
+        history: [...this.history],
+        queue: [...this.queue],
+        current: null,
+      })
+    );
+
+    if (!this.player || !this.autoplayEnabled || revision !== this._autoplayRevision) return null;
+    const track = result?.track || null;
+    if (!track) {
+      this.logger.warn?.("Autoplay could not find a safe related track", {
+        guildId: this.guildId,
+        seedTitle: seed.title,
+        seedArtist: seed.author,
+      });
+      return null;
+    }
+
+    track.autoplay = true;
+    track.autoplaySeedTitle ||= seed.title || "";
+    track.autoplaySeedAuthor ||= seed.author || "";
+    this.logger.log?.("♾️ Autoplay selected a related track", {
+      guildId: this.guildId,
+      seedTitle: seed.title,
+      seedArtist: seed.author,
+      selectedTitle: track.title,
+      selectedArtist: track.author,
+      provider: result.recommendationProvider || track.autoplayProvider || result.source,
+      score: Number(result.score || track.autoplayScore || 0).toFixed(3),
+    });
+    return track;
   }
 
   async connect({ guildId, voiceChannelId, shardId, deaf = true, mute = false }) {
@@ -116,7 +235,9 @@ class GuildPlayer {
   }
 
   enqueue(track) {
+    if (track && track.autoplay !== true) track.autoplay = false;
     this.queue.push(track);
+    if (this.queue.length === 1 && this._autoplayPrefetch) this._invalidateAutoplayPrefetch();
     return this.queue.length;
   }
 
@@ -133,16 +254,36 @@ class GuildPlayer {
     return this.queue.slice(0, limit);
   }
 
+  getHistoryPreview(limit = 10) {
+    return this.history.slice(-Math.max(0, limit)).reverse();
+  }
+
   queueLength() {
     return this.queue.length;
+  }
+
+  autoplayStatus() {
+    return this.autoplayEnabled;
+  }
+
+  async setAutoplay(enabled) {
+    this.autoplayEnabled = Boolean(enabled);
+    this._invalidateAutoplayPrefetch();
+    if (this.autoplayEnabled) this._primeAutoplay();
+    return this.autoplayEnabled;
   }
 
   async _startTrack(track) {
     if (!this.player) throw new Error("Not connected.");
     this.current = track;
+    if (!track.autoplay) {
+      this.autoplaySeed = track;
+      this._invalidateAutoplayPrefetch();
+    }
     try {
       await this.player.playTrack({ track: { encoded: track.encoded } });
       await this.player.setGlobalVolume(this._toLavalinkVolume(this.volume));
+      this._primeAutoplay();
       return track;
     } catch (error) {
       if (this.current === track) this.current = null;
@@ -170,6 +311,8 @@ class GuildPlayer {
   async stopAndClear() {
     if (!this.player) throw new Error("Not connected.");
     this.queue = [];
+    this.autoplayEnabled = false;
+    this._invalidateAutoplayPrefetch();
     const hadCurrent = Boolean(this.current);
     this.current = null;
     if (hadCurrent) await this.player.stopTrack();
@@ -248,6 +391,10 @@ class GuildPlayer {
           if (fallback?.track) {
             const replacement = fallback.track;
             replacement.fallbackAttempted = true;
+            replacement.autoplay = Boolean(failed.autoplay);
+            replacement.autoplayProvider ||= failed.autoplayProvider;
+            replacement.autoplaySeedTitle ||= failed.autoplaySeedTitle;
+            replacement.autoplaySeedAuthor ||= failed.autoplaySeedAuthor;
             try {
               const started = await this._startTrack(replacement);
               this.logger.log?.("🔁 Recovered blocked playback through another provider", {
@@ -313,6 +460,8 @@ class GuildPlayer {
         return null;
       }
 
+      this._rememberTrack(finished);
+
       if (reason === "finished") {
         if (this.loopMode === "track") {
           return this._startTrack(finished);
@@ -322,11 +471,19 @@ class GuildPlayer {
         }
       }
 
+      // Manual queue entries always beat autoplay, including entries added while a
+      // prefetched recommendation was still being resolved.
+      let next = this.queue.shift();
+      if (next) return this._startTrack(next);
+
+      const recommended = await this._resolveAutoplayTrack(finished);
+      next = this.queue.shift();
+      if (next) return this._startTrack(next);
+      if (recommended) return this._startTrack(recommended);
+
       // stopped (manual skip), loadFailed, and unknown terminal reasons never
       // replay the failed/skipped item. They advance once through this path.
-      const next = this.queue.shift();
-      if (!next) return null;
-      return this._startTrack(next);
+      return null;
     });
   }
 }
