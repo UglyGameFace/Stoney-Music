@@ -1,7 +1,7 @@
 # Active Task — Restore Stoney Music playback
 
 ## Scope
-Restore and harden YouTube playback, tokenless Apple Music song/album resolution, and tokenless Spotify single-link resolution; repair queue lifecycle; sanitize and validate the project before publishing it to a new private GitHub repository.
+Restore and harden YouTube playback, tokenless Apple Music song/album resolution, and tokenless Spotify single-link resolution; repair queue lifecycle; sanitize, publish, and validate the project before live deployment.
 
 ## Root-cause findings
 - The backup bundled Lavalink 4.1.2 and stale YouTube-source 1.16.0 configuration.
@@ -28,25 +28,35 @@ Restore and harden YouTube playback, tokenless Apple Music song/album resolution
 - JavaScript syntax check: passed for 15 files.
 - Bash syntax check: passed.
 - `application.yml`: parsed and semantically checked.
-- Regression/integration suite: 28/28 passed.
+- Regression/integration suite: 28/28 passed, including a final rerun after publication.
 - Process-supervision integration test: passed and confirmed Lavalink cleanup after Node exit.
 - Exact-value scan against live secrets from the original backup: passed with no matches.
 - Generic Discord/GitHub token and private-key pattern scan: passed.
 - Duplicate/conflict inspection: one resolver, one guild-player class, one player manager, and one interaction owner.
 - Node 22.16.0 and Java 21 local validation environment confirmed.
-- Dependency installation could not be completed in this sandbox because its npm registry was unreachable and no offline cache existed. GitHub CI is configured to install and validate dependencies once published.
-- Live Discord/Discloud playback smoke testing remains required because this environment has no bot token, voice connection, or outbound package/runtime access.
+- discord.js 14.26.4 manifest confirms Node >=18; the configured Node 22 line is compatible.
+- Shoukaku source confirms the runtime APIs used by the bot: `getIdealNode`, `joinVoiceChannel`, `rest.resolve`, `playTrack`, `stopTrack`, `setGlobalVolume`, and `setFilters`.
+- Live Discord/Discloud playback smoke testing remains required because this environment has no bot token or voice connection.
 
 ## Cleanup status
 - Original backup remains untouched.
-- Publishable tree contains no `.env`, live token, Lavalink JAR, plugins, logs, caches, `node_modules`, or deployment archives.
+- Published tree contains no `.env`, live token, Lavalink JAR, plugins, logs, caches, `node_modules`, or deployment archives.
 - Stale Lavalink/LavaSrc configuration and duplicate/obsolete resolver behavior were removed rather than retained as compatibility patches.
 
 ## Publication status
-The sanitized source is being published to `UglyGameFace/Stoney-Music`. The repository baseline must pass GitHub dependency installation and CI on the exact published commit before it is treated as merge/deployment-ready.
+- Sanitized source published to `UglyGameFace/Stoney-Music` on `main`.
+- Runtime baseline commit: `beb55b124bd3915327dbeb37a613989d26795a41`.
+- Validation-only draft PR: `#1`, branch `agent/validate-published-baseline`.
+- The repository is currently public. No secrets were published, but the intended repository visibility was private.
+
+## Current blockers
+- GitHub created no Actions check suite or workflow run after PR `opened`, branch `synchronize`, and PR `reopened` events. This points to repository/account Actions settings rather than a test failure—the workflow never began `npm install`.
+- The connected GitHub integration can publish source, branches, commits, and pull requests, but it cannot change repository visibility or enable repository Actions.
+- Real dependency installation therefore remains unverified in GitHub-hosted CI.
 
 ## Remaining external gates
-- GitHub Actions must install the real dependencies and pass the complete validation suite.
+- Enable GitHub Actions for this repository and rerun draft PR #1; do not merge its `VALIDATION_TRIGGER.md` file.
+- Change repository visibility to private if the source should not be public.
 - A controlled Discloud smoke test must verify text search, direct YouTube playback, YouTube playlists, Apple Music song/album matching, Spotify track/mobile-link matching, skip/loop behavior, failure recovery, and process cleanup.
 
 ## Backlog
